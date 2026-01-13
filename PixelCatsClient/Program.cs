@@ -15,8 +15,10 @@ class Program
     {
         Console.WriteLine("PixelCats Leaderboard client");
 
-        // Accept explicit score file path as first arg, otherwise use default relative path
-        string scoreFilePath = args.Length > 0 ? args[0] : Path.Combine("..", "ConsoleTest", "latest_score.json");
+        // Resolve score file path (accept explicit path, otherwise try several likely locations)
+        string scoreFilePath = ResolveScoreFilePath(args);
+
+        Console.WriteLine($"[PixelCatsClient] Using score file: {scoreFilePath} (exists: {File.Exists(scoreFilePath)})");
 
         // Read name
         Console.WriteLine("Please enter a name for the leaderboard:");
@@ -52,6 +54,23 @@ class Program
             Console.WriteLine("Top scores:");
             foreach (var s in scores)
                 Console.WriteLine($"{s.name} — {s.score} ({s.created_at})");
+        }
+    }
+
+
+    static string ResolveScoreFilePath(string[] args)
+    {
+        if (args.Length > 0 && !string.IsNullOrWhiteSpace(args[0]))
+            return args[0];
+
+        try
+        {
+            var shared = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "shared", "latest_score.json"));
+            return shared;
+        }
+        catch
+        {
+            return Path.Combine("..", "ConsoleTest", "latest_score.json");
         }
     }
 
