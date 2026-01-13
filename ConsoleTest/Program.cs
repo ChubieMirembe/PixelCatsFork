@@ -4,6 +4,8 @@ using ConsoleTest.Games;
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using System.IO;
+using System.Text.Json;
 
 namespace SnakeGame
 {
@@ -46,6 +48,37 @@ namespace SnakeGame
 
             currentGame = games[game];
 
+            // Score export setup
+            int lastExportedScore = int.MinValue;
+            string sharedDir;
+            try
+            {
+                sharedDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "shared"));
+                Directory.CreateDirectory(sharedDir);
+            }
+            catch
+            {
+                // fallback to local folder if something goes wrong
+                sharedDir = Path.Combine(AppContext.BaseDirectory, "shared");
+                Directory.CreateDirectory(sharedDir);
+            }
+
+            string scoreFilePath = Path.Combine(sharedDir, "latest_score.json");
+            Console.WriteLine($"[ConsoleTest] Score file: {scoreFilePath}");
+
+            // Ensure the file exists at startup with the current game's score (safe fallback to 0)
+            try
+            {
+                int initialScore = 0;
+                try { initialScore = currentGame?.GetScore() ?? 0; } catch { initialScore = 0; }
+                File.WriteAllText(scoreFilePath, JsonSerializer.Serialize(new { score = initialScore }));
+                lastExportedScore = initialScore;
+                Console.WriteLine($"[ConsoleTest] Initialized score file '{scoreFilePath}' with score {initialScore}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ConsoleTest] Failed to initialize score file '{scoreFilePath}': {ex.GetType().Name}: {ex.Message}");
+            }
             state = State.Title;
             while (true)
             {
@@ -90,6 +123,29 @@ namespace SnakeGame
 
                     // Update current game
                     currentGame.Update(pixels);
+
+                    try
+                    {
+                        int currentScore = currentGame.GetScore();
+                        if (currentScore != lastExportedScore)
+                        {
+                            // Write new score and log success/failure
+                            try
+                            {
+                                File.WriteAllText(scoreFilePath, JsonSerializer.Serialize(new { score = currentScore }));
+                                lastExportedScore = currentScore;
+                                Console.WriteLine($"[ConsoleTest] Exported score {currentScore} -> {scoreFilePath}");
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[ConsoleTest] Failed to write score to '{scoreFilePath}': {ex.GetType().Name}: {ex.Message}");
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // ignore game GetScore errors
+                    }
 
                     // Display score (only for Snake in original)
                     if (game == GameChoiceState.Snake)
