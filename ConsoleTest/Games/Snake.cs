@@ -2,22 +2,28 @@ using PixelBoard;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 
-namespace SnakeGame.Games
+namespace ConsoleTest.Games
 {
     public class Snake : IGame
     {
-        // Exact variables from original
+        // Game variables
         private Queue<(int x, int y)> snake = new Queue<(int x, int y)>();
         private int snakeLength = 5;
         private int headX = 10;
         private int headY = 5;
-        private int directionX = 1;
-        private int directionY = 0;
+        private int directionX = 0;
+        private int directionY = 1;
+        private int nextDirectionX = 0;  
+        private int nextDirectionY = 1;
         private Random rand = new Random();
         private (int x, int y) food;
         private int score = 0;
         private float rainbowShift = 0f;
+        private bool gameOver = false;
+        private bool wallsAreDeadly = false;  
+        private int moveCounter = 0;       
 
         public void Initialize(IPixel[,] pixels)
         {
@@ -26,15 +32,24 @@ namespace SnakeGame.Games
             snakeLength = 5;
             headX = 10;
             headY = 5;
-            directionX = 1;
-            directionY = 0;
+            directionX = 0;
+            directionY = 1;
+            nextDirectionX = 0;
+            nextDirectionY = 1;
             food = (rand.Next(20), rand.Next(10));
             score = 0;
+            gameOver = false;
+            moveCounter = 0;
+
+            // Initialize snake body
+            for (int i = 0; i < snakeLength; i++)
+            {
+                snake.Enqueue((headX, headY - i));
+            }
         }
 
         public void DrawTitle(IPixel[,] pixels)
         {
-            // EXACT code from lines 78-113 of original Program.cs
             rainbowShift += 0.0001f;
             for (sbyte i = 0; i < 20; i++)
             {
@@ -73,68 +88,176 @@ namespace SnakeGame.Games
 
         public void Update(IPixel[,] pixels)
         {
-            // EXACT code from lines 216-278 of original Program.cs
-            // Check if snake eats food
-            if (headX == food.x && headY == food.y)
+            if (gameOver)
             {
-                score++;
-                snakeLength++;
-                food = (rand.Next(20), rand.Next(10));
+                DrawGameOver(pixels);
+                return;
             }
 
-            // Clear background
-            for (sbyte i = 0; i < 20; i++)
+            moveCounter++;
+
+            if (moveCounter < GetMoveSpeed())
             {
-                for (sbyte j = 0; j < 10; j++)
-                {
-                    pixels[i, j] = new Pixel(255, 30, 255);
-                }
+                DrawGame(pixels); 
+                return;
             }
+
+            moveCounter = 0;
+
+            directionX = nextDirectionX;
+            directionY = nextDirectionY;
 
             // Move snake
             headX += directionX;
             headY += directionY;
 
-            if (headX >= 20) headX = 0;
-            if (headX < 0) headX = 19;
-            if (headY >= 10) headY = 0;
-            if (headY < 0) headY = 9;
+            // Check wall collision
+            if (wallsAreDeadly)
+            {
+                // Walls are deadly - game over
+                if (headX < 0 || headX >= 20 || headY < 0 || headY >= 10)
+                {
+                    gameOver = true;
+                    DrawGameOver(pixels);
+                    return;
+                }
+            }
+            else
+            {
+                // Walls wrap around
+                if (headX >= 20) headX = 0;
+                if (headX < 0) headX = 19;
+                if (headY >= 10) headY = 0;
+                if (headY < 0) headY = 9;
+            }
 
+            // Check self-collision (classic Snake game over condition)
+            if (snake.Contains((headX, headY)))
+            {
+                gameOver = true;
+                DrawGameOver(pixels);
+                return;
+            }
+
+            // Check if snake eats food
+            if (headX == food.x && headY == food.y)
+            {
+                score++;
+                snakeLength++;
+
+                // Spawn food in empty location
+                do
+                {
+                    food = (rand.Next(20), rand.Next(10));
+                } while (snake.Contains(food) || (food.x == headX && food.y == headY));
+            }
+
+            // Update snake body
             snake.Enqueue((headX, headY));
             if (snake.Count > snakeLength)
                 snake.Dequeue();
 
-            foreach (var (x, y) in snake)
-            {
-                pixels[x, y] = new Pixel(0, 255, 0); // Green snake
-            }
-            // Draw food
-            pixels[food.x, food.y] = new Pixel(255, 0, 0); // Red food
+            // Draw game
+            DrawGame(pixels);
         }
 
         public void HandleInput(ConsoleKey key, ref bool stateChanged)
         {
-            // EXACT code from lines 229-248 of original Program.cs
+            if (gameOver) return;
+
+            // Buffer input to prevent reversing into yourself mid-frame
             switch (key)
             {
                 case ConsoleKey.W:
-                    directionX = -1; directionY = 0;
+                case ConsoleKey.UpArrow:
+                    // Can't reverse direction
+                    if (directionX != 1)
+                    {
+                        nextDirectionX = -1;
+                        nextDirectionY = 0;
+                    }
                     break;
                 case ConsoleKey.S:
-                    directionX = 1; directionY = 0;
+                case ConsoleKey.DownArrow:
+                    if (directionX != -1)
+                    {
+                        nextDirectionX = 1;
+                        nextDirectionY = 0;
+                    }
                     break;
                 case ConsoleKey.A:
-                    directionX = 0; directionY = -1;
+                case ConsoleKey.LeftArrow:
+                    if (directionY != 1)
+                    {
+                        nextDirectionX = 0;
+                        nextDirectionY = -1;
+                    }
                     break;
                 case ConsoleKey.D:
-                    directionX = 0; directionY = 1;
+                case ConsoleKey.RightArrow:
+                    if (directionY != -1)
+                    {
+                        nextDirectionX = 0;
+                        nextDirectionY = 1;
+                    }
                     break;
             }
         }
 
         public int GetScore() => score;
 
-        // Helper method from original (lines 288-308)
+        private int GetMoveSpeed()
+        {
+            if (score < 5) return 3;       // Medium start - more engaging
+            if (score < 10) return 2;      // Fast
+            if (score < 20) return 1;      // Very fast - challenging
+            return 1;                       // Keep at very fast
+        }
+
+        private void DrawGame(IPixel[,] pixels)
+        {
+            // Clear background
+            for (sbyte i = 0; i < 20; i++)
+            {
+                for (sbyte j = 0; j < 10; j++)
+                {
+                    pixels[i, j] = new Pixel(20, 20, 40); 
+                }
+            }
+
+            // Draw snake
+            foreach (var (x, y) in snake.Take(snake.Count - 1))
+            {
+                pixels[x, y] = new Pixel(0, 180, 0);
+            }
+
+            // Draw snake head
+            if (snake.Count > 0)
+            {
+                var head = snake.Last();
+                pixels[head.x, head.y] = new Pixel(0, 255, 0);
+            }
+
+            // Draw food
+            pixels[food.x, food.y] = new Pixel(255, 0, 0);
+        }
+
+        private void DrawGameOver(IPixel[,] pixels)
+        {
+            // Draw the final game state 
+            DrawGame(pixels);
+
+            // Flash red overlay
+            for (int i = 0; i < 20; i++)
+            {
+                for (int j = 0; j < 10; j++)
+                {
+                    // Red tint overlay
+                    pixels[i, j] = new Pixel(150, 0, 0);
+                }
+            }
+        }
+
         public static Color ColorFromHSV(double hue, double saturation, double value)
         {
             int hi = Convert.ToInt32(Math.Floor(hue / 60)) % 6;

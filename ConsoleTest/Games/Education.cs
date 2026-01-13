@@ -1,7 +1,7 @@
 using PixelBoard;
 using System;
 
-namespace SnakeGame.Games
+namespace ConsoleTest.Games
 {
     public class Education : IGame
     {
@@ -14,7 +14,7 @@ namespace SnakeGame.Games
 
         public void DrawTitle(IPixel[,] pixels)
         {
-            // EXACT code from lines 149-181 of original Program.cs
+
             for (sbyte i = 0; i < 20; i++)
             {
                 for (sbyte j = 0; j < 10; j++)

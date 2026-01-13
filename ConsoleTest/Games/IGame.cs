@@ -1,7 +1,7 @@
 using PixelBoard;
 using System;
 
-namespace SnakeGame.Games
+namespace ConsoleTest.Games
 {
     public interface IGame
     {
