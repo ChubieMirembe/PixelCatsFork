@@ -163,7 +163,16 @@ namespace ConsoleTest.Games
 
         public void HandleInput(ConsoleKey key, ref bool stateChanged)
         {
-            if (gameOver) return;
+            if (gameOver)
+            {
+                // If game is over, pressing any key could be used to return to title or restart.
+                // We do not change state here; Program handles transitions via stateChanged or IsGameOver check.
+                if (key == ConsoleKey.Escape)
+                {
+                    stateChanged = true;
+                }
+                return;
+            }
 
             // Buffer input to prevent reversing into yourself mid-frame
             switch (key)
@@ -201,8 +210,15 @@ namespace ConsoleTest.Games
                         nextDirectionY = 1;
                     }
                     break;
+                case ConsoleKey.Escape:
+                    // Signal Program that user requested to leave the playing state
+                    stateChanged = true;
+                    break;
             }
         }
+
+        // Expose game-over status so Program can reliably transition to GameOver and export final score.
+        public bool IsGameOver() => gameOver;
 
         public int GetScore() => score;
 
