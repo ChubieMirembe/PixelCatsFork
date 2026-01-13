@@ -10,5 +10,7 @@ namespace ConsoleTest.Games
         void DrawTitle(IPixel[,] pixels);
         void HandleInput(ConsoleKey key, ref bool stateChanged);
         int GetScore();
+        bool IsGameOver();
+        string GetGameOverCode();
     }
 }

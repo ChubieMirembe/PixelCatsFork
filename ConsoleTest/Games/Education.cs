@@ -14,7 +14,6 @@ namespace ConsoleTest.Games
 
         public void DrawTitle(IPixel[,] pixels)
         {
-
             for (sbyte i = 0; i < 20; i++)
             {
                 for (sbyte j = 0; j < 10; j++)
@@ -54,8 +53,16 @@ namespace ConsoleTest.Games
 
         public void HandleInput(ConsoleKey key, ref bool stateChanged)
         {
-            // No input handling in original Education code
+            // Allow escape to return to title
+            if (key == ConsoleKey.Escape)
+            {
+                stateChanged = true;
+            }
         }
+
+        public bool IsGameOver() => false;  // Education mode never ends
+
+        public string GetGameOverCode() => null;  // No code for Education mode
 
         public int GetScore() => score;
     }

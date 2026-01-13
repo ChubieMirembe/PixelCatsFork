@@ -17,6 +17,7 @@ namespace ConsoleTest.Games
         private int dropSpeed = 10; // Frames before piece drops
         private bool gameOver = false;
         private int manualDropCooldown = 0;
+        private string gameOverCode = null;  // Game over code
 
         // Tetromino shapes (7 classic pieces)
         private static readonly int[][,] SHAPES = new int[][,]
@@ -91,6 +92,7 @@ namespace ConsoleTest.Games
             board = new int[20, 10];
             gameOver = false;
             frameCounter = 0;
+            gameOverCode = null;  // Reset code
             SpawnNewPiece();
         }
 
@@ -162,6 +164,7 @@ namespace ConsoleTest.Games
                     if (!IsValidPosition(pieceX, pieceY))
                     {
                         gameOver = true;
+                        gameOverCode = CodeGenerator.GenerateSixDigitCode();  // Generate code
                     }
                 }
             }
@@ -171,7 +174,15 @@ namespace ConsoleTest.Games
 
         public void HandleInput(ConsoleKey key, ref bool stateChanged)
         {
-            if (gameOver) return;
+            if (gameOver)
+            {
+                // Allow escape to return to title
+                if (key == ConsoleKey.Escape)
+                {
+                    stateChanged = true;
+                }
+                return;
+            }
 
             switch (key)
             {
@@ -201,6 +212,7 @@ namespace ConsoleTest.Games
                             if (!IsValidPosition(pieceX, pieceY))
                             {
                                 gameOver = true;
+                                gameOverCode = CodeGenerator.GenerateSixDigitCode();  // Generate code
                             }
                         }
                         manualDropCooldown = 1;
@@ -211,8 +223,16 @@ namespace ConsoleTest.Games
                 case ConsoleKey.Spacebar:
                     RotatePiece();
                     break;
+                case ConsoleKey.Escape:
+                    // Signal Program that user requested to leave the playing state
+                    stateChanged = true;
+                    break;
             }
         }
+
+        public bool IsGameOver() => gameOver;
+
+        public string GetGameOverCode() => gameOverCode;  // Return the generated code
 
         public int GetScore() => score;
 
@@ -363,7 +383,7 @@ namespace ConsoleTest.Games
                     1 => 40,      // Single
                     2 => 100,     // Double
                     3 => 300,     // Triple
-                    4 => 1200,    // Tetris! 
+                    4 => 1200,    // Tetris!  
                     _ => 0
                 };
                 score += points * (level + 1);

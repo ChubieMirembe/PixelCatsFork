@@ -21,7 +21,7 @@ class Program
 
         public long Read() => Interlocked.Read(ref _value);
 
-        // Try to claim this timestamp: set to newMillis only if newMillis > current.
+        // Try to claim this timestamp:  set to newMillis only if newMillis > current. 
         // Returns true if claim succeeded (this caller "owns" the timestamp and should submit).
         public bool TryClaim(long newMillis)
         {
@@ -39,6 +39,22 @@ class Program
         Console.WriteLine("PixelCats Leaderboard client (listening mode)");
 
         string scoreFilePath = ResolveScoreFilePath(args);
+
+        // Ensure the directory exists
+        try
+        {
+            var directory = Path.GetDirectoryName(scoreFilePath);
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+                Console.WriteLine($"[PixelCatsClient] Created directory: {directory}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[PixelCatsClient] Warning: Could not create directory: {ex.Message}");
+        }
+
         Console.WriteLine($"[PixelCatsClient] Watching score file: {scoreFilePath} (exists: {File.Exists(scoreFilePath)})");
 
         // Track the last processed timestamp so we only submit new writes.
@@ -66,12 +82,22 @@ class Program
         var watcherTask = RunFileWatcherAsync(scoreFilePath, sharedTs, apiKey, cts.Token);
         var pollerTask = RunPollerAsync(scoreFilePath, sharedTs, apiKey, cts.Token);
 
-        Console.WriteLine("Listening for new scores. Press Ctrl+C to exit.");
-        await Task.WhenAny(watcherTask, pollerTask);
+        Console.WriteLine("Listening for new scores.  Press Ctrl+C to exit.");
 
-        // Cancel remaining and wait for graceful shutdown
-        cts.Cancel();
-        await Task.WhenAll(watcherTask, pollerTask).ContinueWith(_ => { });
+        // Wait for both tasks (don't exit on first completion)
+        try
+        {
+            await Task.WhenAll(watcherTask, pollerTask);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when Ctrl+C is pressed
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error: {ex.Message}");
+        }
+
         Console.WriteLine("Listener stopped.");
     }
 
@@ -87,7 +113,7 @@ class Program
         }
         catch
         {
-            return Path.Combine("..", "ConsoleTest", "latest_score.json");
+            return Path.Combine(". .", "ConsoleTest", "latest_score.json");
         }
     }
 
@@ -97,25 +123,39 @@ class Program
         var dir = file.DirectoryName ?? AppContext.BaseDirectory;
         var name = file.Name;
 
-        using var watcher = new FileSystemWatcher(dir, name)
+        // Ensure directory exists
+        if (!Directory.Exists(dir))
         {
-            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.CreationTime | NotifyFilters.Size
-        };
+            Console.WriteLine($"[Watcher] Waiting for directory to exist: {dir}");
+            while (!Directory.Exists(dir) && !ct.IsCancellationRequested)
+            {
+                await Task.Delay(1000, ct);
+            }
+            if (ct.IsCancellationRequested) return;
+        }
 
+        FileSystemWatcher watcher = null;
         var eventQueue = new System.Collections.Concurrent.BlockingCollection<FileSystemEventArgs>();
-
-        FileSystemEventHandler onChanged = (s, e) =>
-        {
-            // Enqueue the event for serialized processing
-            eventQueue.Add(e);
-        };
-
-        watcher.Changed += onChanged;
-        watcher.Created += onChanged;
-        watcher.EnableRaisingEvents = true;
 
         try
         {
+            watcher = new FileSystemWatcher(dir, name)
+            {
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.CreationTime | NotifyFilters.Size
+            };
+
+            FileSystemEventHandler onChanged = (s, e) =>
+            {
+                // Enqueue the event for serialized processing
+                eventQueue.Add(e);
+            };
+
+            watcher.Changed += onChanged;
+            watcher.Created += onChanged;
+            watcher.EnableRaisingEvents = true;
+
+            Console.WriteLine($"[Watcher] Monitoring:  {filePath}");
+
             while (!ct.IsCancellationRequested)
             {
                 FileSystemEventArgs evt = null;
@@ -127,14 +167,21 @@ class Program
 
                 if (evt == null) continue;
 
-                var (score, timestamp, state) = await TryReadScoreWithTimestampAsync(filePath, ct);
+                var (score, timestamp, state, code) = await TryReadScoreWithTimestampAsync(filePath, ct);
                 if (!score.HasValue || !timestamp.HasValue)
                     continue;
 
-                // Only act on final/game-over writes. Ignore startup/live updates.
+                // Only act on final/game-over writes.  Ignore startup/live updates. 
                 // ConsoleTest now writes "state":"GameOver" (or you can change the string to match your writer).
                 if (!string.Equals(state, "GameOver", StringComparison.OrdinalIgnoreCase))
                     continue;
+
+                // Code must be present
+                if (string.IsNullOrEmpty(code))
+                {
+                    Console.WriteLine("Warning: GameOver state detected but no code found in file");
+                    continue;
+                }
 
                 long tsMs = timestamp.Value.ToUnixTimeMilliseconds();
 
@@ -142,10 +189,7 @@ class Program
                 if (!sharedTs.TryClaim(tsMs))
                     continue;
 
-                Console.WriteLine($"Detected new score write at {timestamp.Value:u}. Score={score.Value}");
-                // Generate code and submit
-                string code = GenerateSixDigitCode();
-                Console.WriteLine($"Generated code: {code}  — submitting code+score...");
+                Console.WriteLine($"Detected new score write at {timestamp.Value:u}.  Score={score.Value}, Code={code}");
                 var ok = await SubmitCodeAsync(code, score.Value, apiKey);
                 Console.WriteLine(ok ? "Code+score submitted!" : "Failed to submit code+score");
 
@@ -159,15 +203,26 @@ class Program
                 }
             }
         }
+        catch (OperationCanceledException)
+        {
+            // Expected
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Watcher] Error: {ex.Message}");
+        }
         finally
         {
             eventQueue.CompleteAdding();
-            watcher.Changed -= onChanged;
-            watcher.Created -= onChanged;
+            if (watcher != null)
+            {
+                watcher.EnableRaisingEvents = false;
+                watcher.Dispose();
+            }
         }
     }
 
-    // A lightweight poller fallback in case FileSystemWatcher misses events or platform issues arise.
+    // A lightweight poller fallback in case FileSystemWatcher misses events or platform issues arise. 
     static async Task RunPollerAsync(string filePath, SharedTimestamp sharedTs, string apiKey, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
@@ -182,11 +237,18 @@ class Program
                     // quick check against shared baseline (avoid expensive parsing if not newer)
                     if (writeMs > sharedTs.Read())
                     {
-                        var (score, timestamp, state) = await TryReadScoreWithTimestampAsync(filePath, ct);
+                        var (score, timestamp, state, code) = await TryReadScoreWithTimestampAsync(filePath, ct);
                         timestamp ??= DateTimeOffset.FromUnixTimeMilliseconds(writeMs);
 
                         // Only process final/game-over writes
                         if (!string.Equals(state, "GameOver", StringComparison.OrdinalIgnoreCase))
+                        {
+                            await Task.Delay(1000, ct);
+                            continue;
+                        }
+
+                        // Code must be present
+                        if (string.IsNullOrEmpty(code))
                         {
                             await Task.Delay(1000, ct);
                             continue;
@@ -200,9 +262,7 @@ class Program
                             if (!sharedTs.TryClaim(tsMs))
                                 continue;
 
-                            Console.WriteLine($"Poller detected new score write at {timestamp.Value:u}. Score={score.Value}");
-                            string code = GenerateSixDigitCode();
-                            Console.WriteLine($"Generated code: {code}  — submitting code+score...");
+                            Console.WriteLine($"Poller detected new score write at {timestamp.Value:u}. Score={score.Value}, Code={code}");
                             var ok = await SubmitCodeAsync(code, score.Value, apiKey);
                             Console.WriteLine(ok ? "Code+score submitted!" : "Failed to submit code+score");
 
@@ -228,9 +288,9 @@ class Program
         }
     }
 
-    // Attempts to read "score", optional "state" and a timestamp property if present.
+    // Attempts to read "score", "code", optional "state" and a timestamp property if present.
     // Supports timestamp as ISO string or numeric unix seconds/milliseconds.
-    static async Task<(int? score, DateTimeOffset? timestamp, string state)> TryReadScoreWithTimestampAsync(string path, CancellationToken ct)
+    static async Task<(int? score, DateTimeOffset? timestamp, string state, string code)> TryReadScoreWithTimestampAsync(string path, CancellationToken ct)
     {
         // Try a few times in case the game is still writing the file.
         for (int attempt = 0; attempt < 6; attempt++)
@@ -240,14 +300,14 @@ class Program
             try
             {
                 if (!File.Exists(path))
-                    return (null, null, null);
+                    return (null, null, null, null);
 
                 // Open with shared read so we don't lock the writer
                 using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
                 using var sr = new StreamReader(fs);
                 var json = await sr.ReadToEndAsync();
                 if (string.IsNullOrWhiteSpace(json))
-                    return (null, null, null);
+                    return (null, null, null, null);
 
                 using var doc = JsonDocument.Parse(json);
                 var root = doc.RootElement;
@@ -255,6 +315,7 @@ class Program
                 int? score = null;
                 DateTimeOffset? timestamp = null;
                 string state = null;
+                string code = null;
 
                 if (root.TryGetProperty("score", out var scoreProp) && scoreProp.ValueKind == JsonValueKind.Number)
                 {
@@ -265,6 +326,11 @@ class Program
                 if (root.TryGetProperty("state", out var stateProp) && stateProp.ValueKind == JsonValueKind.String)
                 {
                     state = stateProp.GetString();
+                }
+
+                if (root.TryGetProperty("code", out var codeProp) && codeProp.ValueKind == JsonValueKind.String)
+                {
+                    code = codeProp.GetString();
                 }
 
                 // look for common timestamp fields
@@ -301,7 +367,7 @@ class Program
                     timestamp = File.GetLastWriteTimeUtc(path);
                 }
 
-                return (score, timestamp, state);
+                return (score, timestamp, state, code);
             }
             catch (JsonException)
             {
@@ -314,21 +380,13 @@ class Program
             catch (Exception ex)
             {
                 Console.WriteLine($"Error reading score file: {ex.Message}");
-                return (null, null, null);
+                return (null, null, null, null);
             }
 
             await Task.Delay(200, ct);
         }
 
-        return (null, null, null);
-    }
-
-    static string GenerateSixDigitCode()
-    {
-        Span<byte> bytes = stackalloc byte[4];
-        RandomNumberGenerator.Fill(bytes);
-        uint value = BitConverter.ToUInt32(bytes) % 1_000_000;
-        return value.ToString("D6");
+        return (null, null, null, null);
     }
 
     static async Task<bool> SubmitCodeAsync(string code, int score, string apiKey = null)

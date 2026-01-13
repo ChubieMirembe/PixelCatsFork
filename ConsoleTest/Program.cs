@@ -41,9 +41,9 @@ namespace SnakeGame
             // Initialize games
             games = new Dictionary<GameChoiceState, IGame>
             {
-                { GameChoiceState.Snake, new Snake() },
+                { GameChoiceState. Snake, new Snake() },
                 { GameChoiceState.Tetris, new Tetris() },
-                { GameChoiceState.Education, new Education() }
+                { GameChoiceState. Education, new Education() }
             };
 
             currentGame = games[game];
@@ -71,7 +71,7 @@ namespace SnakeGame
             {
                 int initialScore = 0;
                 try { initialScore = currentGame?.GetScore() ?? 0; } catch { initialScore = 0; }
-                WriteScoreFileAtomic(scoreFilePath, initialScore, "Startup");
+                WriteScoreFileAtomic(scoreFilePath, initialScore, "Startup", null);
                 lastExportedScore = initialScore;
                 Console.WriteLine($"[ConsoleTest] Initialized score file '{scoreFilePath}' with score {initialScore}");
             }
@@ -117,7 +117,7 @@ namespace SnakeGame
                 {
                     Thread.Sleep(100);
 
-                    // Check for input (only Snake needs it in Playing state)
+                    // Check for input
                     if (Console.KeyAvailable)
                     {
                         var key = Console.ReadKey(true).Key;
@@ -128,31 +128,17 @@ namespace SnakeGame
                         if (stateChanged)
                         {
                             state = State.Title;
-                            // Optionally reset or re-initialize visuals for the title screen next loop
-                            // currentGame = games[game]; // keep current selection
                         }
                     }
 
                     // Update current game
                     currentGame.Update(pixels);
 
-                    // NEW: ask the game if it's over (if it exposes IsGameOver)
-                    var mg = currentGame.GetType().GetMethod("IsGameOver");
-                    if (mg != null)
+                    // Check if game is over using the IsGameOver method
+                    if (currentGame.IsGameOver())
                     {
-                        try
-                        {
-                            var result = mg.Invoke(currentGame, null);
-                            if (result is bool b && b)
-                            {
-                                state = State.GameOver;
-                            }
-                        }
-                        catch { /* ignore reflection call errors */ }
+                        state = State.GameOver;
                     }
-
-                    // IMPORTANT: Do NOT write score on every point update.
-                    // Keep score local in the game and only export when the game transitions to GameOver.
                 }
 
                 // Detect state transitions and export final score only when the game ends
@@ -163,29 +149,36 @@ namespace SnakeGame
                     {
                         try
                         {
-                            int finalScore = 0;
-                            try { finalScore = currentGame?.GetScore() ?? 0; } catch { finalScore = 0; }
-                            WriteScoreFileAtomic(scoreFilePath, finalScore, "GameOver");
+                            int finalScore = currentGame.GetScore();
+                            string gameOverCode = currentGame.GetGameOverCode();
+
+                            WriteScoreFileAtomic(scoreFilePath, finalScore, "GameOver", gameOverCode);
                             lastExportedScore = finalScore;
-                            Console.WriteLine($"[ConsoleTest] Final score exported {finalScore} -> {scoreFilePath}");
+                            Console.WriteLine($"[ConsoleTest] Final score exported:  {finalScore}, Code: {gameOverCode} -> {scoreFilePath}");
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"[ConsoleTest] Failed to write final score to '{scoreFilePath}': {ex.GetType().Name}: {ex.Message}");
+                            Console.WriteLine($"[ConsoleTest] Failed to write final score to '{scoreFilePath}':  {ex.GetType().Name}: {ex.Message}");
                         }
                     }
                     previousState = state;
                 }
 
-                // Display score (only for Snake in original)
-                if (game == GameChoiceState.Snake)
+                // Display score or code
+                if (currentGame.IsGameOver() && !string.IsNullOrEmpty(currentGame.GetGameOverCode()))
                 {
-                    try
+                    // Display the 6-digit code when game is over
+                    if (int.TryParse(currentGame.GetGameOverCode(), out int codeInt))
                     {
-                        emulatorDisplay.DisplayInt(currentGame.GetScore());
-                        //hardwareDisplay.DisplayInt(currentGame.GetScore());               <-- Uncomment when hardware display is available
+                        emulatorDisplay.DisplayInt(codeInt);
+                        //hardwareDisplay.DisplayInt(codeInt);
                     }
-                    catch { }
+                }
+                else
+                {
+                    // Display current score during gameplay
+                    emulatorDisplay.DisplayInt(currentGame.GetScore());
+                    //hardwareDisplay.DisplayInt(currentGame.GetScore());
                 }
 
                 emulatorDisplay.Draw(pixels);
@@ -193,15 +186,15 @@ namespace SnakeGame
             }
         }
 
-        // Writes the score, an ISO-8601 UTC timestamp and optional state atomically.
-        static void WriteScoreFileAtomic(string path, int score, string state = null)
+        // Writes the score, code, an ISO-8601 UTC timestamp and optional state atomically.
+        static void WriteScoreFileAtomic(string path, int score, string state = null, string code = null)
         {
             var payload = new
             {
                 score = score,
                 state = state,
-                // DateTimeOffset serializes as an ISO 8601 string by System.Text.Json by default.
-                timestamp = DateTimeOffset.UtcNow
+                code = code,
+                timestamp = DateTimeOffset.UtcNow.ToString("O")
             };
 
             var json = JsonSerializer.Serialize(payload);

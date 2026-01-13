@@ -15,15 +15,16 @@ namespace ConsoleTest.Games
         private int headY = 5;
         private int directionX = 0;
         private int directionY = 1;
-        private int nextDirectionX = 0;  
+        private int nextDirectionX = 0;
         private int nextDirectionY = 1;
         private Random rand = new Random();
         private (int x, int y) food;
         private int score = 0;
         private float rainbowShift = 0f;
         private bool gameOver = false;
-        private bool wallsAreDeadly = false;  
-        private int moveCounter = 0;       
+        private bool wallsAreDeadly = false;
+        private int moveCounter = 0;
+        private string gameOverCode = null;
 
         public void Initialize(IPixel[,] pixels)
         {
@@ -40,6 +41,7 @@ namespace ConsoleTest.Games
             score = 0;
             gameOver = false;
             moveCounter = 0;
+            gameOverCode = null;  // Reset code
 
             // Initialize snake body
             for (int i = 0; i < snakeLength; i++)
@@ -98,7 +100,7 @@ namespace ConsoleTest.Games
 
             if (moveCounter < GetMoveSpeed())
             {
-                DrawGame(pixels); 
+                DrawGame(pixels);
                 return;
             }
 
@@ -118,6 +120,7 @@ namespace ConsoleTest.Games
                 if (headX < 0 || headX >= 20 || headY < 0 || headY >= 10)
                 {
                     gameOver = true;
+                    gameOverCode = CodeGenerator.GenerateSixDigitCode();  // Generate code
                     DrawGameOver(pixels);
                     return;
                 }
@@ -135,6 +138,7 @@ namespace ConsoleTest.Games
             if (snake.Contains((headX, headY)))
             {
                 gameOver = true;
+                gameOverCode = CodeGenerator.GenerateSixDigitCode();  // Generate code
                 DrawGameOver(pixels);
                 return;
             }
@@ -217,8 +221,10 @@ namespace ConsoleTest.Games
             }
         }
 
-        // Expose game-over status so Program can reliably transition to GameOver and export final score.
+        // Expose game-over status so Program can reliably transition to GameOver and export final score. 
         public bool IsGameOver() => gameOver;
+
+        public string GetGameOverCode() => gameOverCode;  // Return the generated code
 
         public int GetScore() => score;
 
@@ -237,7 +243,7 @@ namespace ConsoleTest.Games
             {
                 for (sbyte j = 0; j < 10; j++)
                 {
-                    pixels[i, j] = new Pixel(20, 20, 40); 
+                    pixels[i, j] = new Pixel(20, 20, 40);
                 }
             }
 
