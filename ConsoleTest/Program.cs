@@ -4,6 +4,8 @@ using SnakeGame.Games;
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using System.IO;
+using System.Text.Json;
 
 namespace SnakeGame
 {
@@ -45,6 +47,10 @@ namespace SnakeGame
             };
 
             currentGame = games[game];
+
+            // Score export setup
+            int lastExportedScore = int.MinValue;
+            string scoreFilePath = Path.Combine(AppContext.BaseDirectory, "latest_score.json");
 
             state = State.Title;
             while (true)
@@ -90,6 +96,21 @@ namespace SnakeGame
 
                     // Update current game
                     currentGame.Update(pixels);
+
+                    // Export score when it changes
+                    try
+                    {
+                        int currentScore = currentGame.GetScore();
+                        if (currentScore != lastExportedScore)
+                        {
+                            File.WriteAllText(scoreFilePath, JsonSerializer.Serialize(new { score = currentScore }));
+                            lastExportedScore = currentScore;
+                        }
+                    }
+                    catch
+                    {
+                        // ignore IO errors
+                    }
 
                     // Display score (only for Snake in original)
                     if (game == GameChoiceState.Snake)
