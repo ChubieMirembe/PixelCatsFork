@@ -17,6 +17,7 @@ namespace ConsoleTest.Games
         private int dropSpeed = 10; // Frames before piece drops
         private bool gameOver = false;
         private int manualDropCooldown = 0;
+        private int rotateCooldown = 0;  // Rotation cooldown
         private string gameOverCode = null;  // Game over code
 
         // Tetromino shapes (7 classic pieces)
@@ -46,13 +47,13 @@ namespace ConsoleTest.Games
 
         private static readonly Color[] PIECE_COLORS = new Color[]
         {
-            Color. Cyan,     // I
+            Color.Cyan,     // I
             Color.Yellow,   // O
             Color.Purple,   // T
             Color.Green,    // S
             Color.Red,      // Z
             Color.Blue,     // J
-            Color.Orange    // L
+            Color. Orange    // L
         };
 
         private class Tetromino
@@ -92,6 +93,8 @@ namespace ConsoleTest.Games
             board = new int[20, 10];
             gameOver = false;
             frameCounter = 0;
+            manualDropCooldown = 0;
+            rotateCooldown = 0;
             gameOverCode = null;  // Reset code
             SpawnNewPiece();
         }
@@ -149,6 +152,12 @@ namespace ConsoleTest.Games
                 manualDropCooldown--;
             }
 
+            // Decrease rotate cooldown
+            if (rotateCooldown > 0)
+            {
+                rotateCooldown--;
+            }
+
             // Auto-drop piece
             if (frameCounter >= dropSpeed)
             {
@@ -190,7 +199,7 @@ namespace ConsoleTest.Games
                 case ConsoleKey.LeftArrow:
                     MovePiece(-1, 0);
                     break;
-                case ConsoleKey.D:  // Move right
+                case ConsoleKey.D:   // Move right
                 case ConsoleKey.RightArrow:
                     MovePiece(1, 0);
                     break;
@@ -201,7 +210,7 @@ namespace ConsoleTest.Games
                     {
                         if (MovePiece(0, 1))
                         {
-                            // Soft drop bonus:  1 point per cell dropped
+                            // Soft drop bonus:   1 point per cell dropped
                             score += 1;
                         }
                         else
@@ -221,7 +230,12 @@ namespace ConsoleTest.Games
                 case ConsoleKey.W:  // Rotate
                 case ConsoleKey.UpArrow:
                 case ConsoleKey.Spacebar:
-                    RotatePiece();
+                    // Only allow rotation if cooldown expired
+                    if (rotateCooldown <= 0)
+                    {
+                        RotatePiece();
+                        rotateCooldown = 5;  // Prevent rotation for 3 frames (~300ms)
+                    }
                     break;
                 case ConsoleKey.Escape:
                     // Signal Program that user requested to leave the playing state
@@ -383,7 +397,7 @@ namespace ConsoleTest.Games
                     1 => 40,      // Single
                     2 => 100,     // Double
                     3 => 300,     // Triple
-                    4 => 1200,    // Tetris!  
+                    4 => 1200,    // Tetris!   
                     _ => 0
                 };
                 score += points * (level + 1);

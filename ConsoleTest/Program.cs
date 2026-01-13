@@ -77,12 +77,15 @@ namespace SnakeGame
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ConsoleTest] Failed to initialize score file '{scoreFilePath}': {ex.GetType().Name}: {ex.Message}");
+                Console.WriteLine($"[ConsoleTest] Failed to initialize score file '{scoreFilePath}':  {ex.GetType().Name}: {ex.Message}");
             }
 
             // Track previous state so we only export on state transition to GameOver
             State previousState = state;
             state = State.Title;
+
+            // Track the last game over code to display on title screen
+            string lastGameOverCode = null;
 
             while (true)
             {
@@ -97,6 +100,7 @@ namespace SnakeGame
                             case ConsoleKey.S:
                                 state = State.Playing;
                                 currentGame.Initialize(pixels);
+                                lastGameOverCode = null; // Clear the code when starting a new game
                                 break;
                             case ConsoleKey.A:
                                 game = (GameChoiceState)(((int)game + 2) % 3);
@@ -141,6 +145,20 @@ namespace SnakeGame
                     }
                 }
 
+                if (state == State.GameOver)
+                {
+                    // Show game over screen briefly (1 second)
+                    currentGame.Update(pixels);
+
+                    // Get the code before returning to title
+                    lastGameOverCode = currentGame.GetGameOverCode();
+
+                    Thread.Sleep(1000); // Show game over screen for 1 second
+
+                    Console.WriteLine($"[ConsoleTest] Returning to title screen with code {lastGameOverCode}");
+                    state = State.Title;
+                }
+
                 // Detect state transitions and export final score only when the game ends
                 if (previousState != state)
                 {
@@ -158,17 +176,17 @@ namespace SnakeGame
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"[ConsoleTest] Failed to write final score to '{scoreFilePath}':  {ex.GetType().Name}: {ex.Message}");
+                            Console.WriteLine($"[ConsoleTest] Failed to write final score to '{scoreFilePath}': {ex.GetType().Name}: {ex.Message}");
                         }
                     }
                     previousState = state;
                 }
 
-                // Display score or code
-                if (currentGame.IsGameOver() && !string.IsNullOrEmpty(currentGame.GetGameOverCode()))
+                // Display code on title screen if available, otherwise display current score
+                if (!string.IsNullOrEmpty(lastGameOverCode) && state == State.Title)
                 {
-                    // Display the 6-digit code when game is over
-                    if (int.TryParse(currentGame.GetGameOverCode(), out int codeInt))
+                    // Display the last game over code on title screen
+                    if (int.TryParse(lastGameOverCode, out int codeInt))
                     {
                         emulatorDisplay.DisplayInt(codeInt);
                         //hardwareDisplay.DisplayInt(codeInt);
@@ -205,7 +223,7 @@ namespace SnakeGame
                 dir = AppContext.BaseDirectory;
             Directory.CreateDirectory(dir);
 
-            // Write to a temp file in the same directory then replace target to avoid partial reads.
+            // Write to a temp file in the same directory then replace target to avoid partial reads. 
             var tmp = Path.Combine(dir, $"{Guid.NewGuid():N}.tmp");
             File.WriteAllText(tmp, json);
 
