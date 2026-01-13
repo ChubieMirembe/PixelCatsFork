@@ -2,7 +2,7 @@ using PixelBoard;
 using System;
 using System.Drawing;
 
-namespace SnakeGame.Games
+namespace ConsoleTest.Games
 {
     public class Tetris : IGame
     {

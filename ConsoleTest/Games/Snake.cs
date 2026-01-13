@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 
-namespace SnakeGame.Games
+namespace ConsoleTest.Games
 {
     public class Snake : IGame
     {
@@ -34,7 +34,7 @@ namespace SnakeGame.Games
 
         public void DrawTitle(IPixel[,] pixels)
         {
-            // EXACT code from lines 78-113 of original Program.cs
+
             rainbowShift += 0.0001f;
             for (sbyte i = 0; i < 20; i++)
             {
@@ -73,7 +73,7 @@ namespace SnakeGame.Games
 
         public void Update(IPixel[,] pixels)
         {
-            // EXACT code from lines 216-278 of original Program.cs
+
             // Check if snake eats food
             if (headX == food.x && headY == food.y)
             {
@@ -114,7 +114,7 @@ namespace SnakeGame.Games
 
         public void HandleInput(ConsoleKey key, ref bool stateChanged)
         {
-            // EXACT code from lines 229-248 of original Program.cs
+
             switch (key)
             {
                 case ConsoleKey.W:
@@ -134,7 +134,6 @@ namespace SnakeGame.Games
 
         public int GetScore() => score;
 
-        // Helper method from original (lines 288-308)
         public static Color ColorFromHSV(double hue, double saturation, double value)
         {
             int hi = Convert.ToInt32(Math.Floor(hue / 60)) % 6;

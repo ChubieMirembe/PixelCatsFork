@@ -1,6 +1,6 @@
 ﻿using Microsoft.Extensions.Configuration;
 using PixelBoard;
-using SnakeGame.Games;
+using ConsoleTest.Games;
 using System;
 using System.Collections.Generic;
 using System.Threading;
