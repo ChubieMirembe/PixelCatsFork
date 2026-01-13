@@ -71,7 +71,7 @@ namespace SnakeGame
             {
                 int initialScore = 0;
                 try { initialScore = currentGame?.GetScore() ?? 0; } catch { initialScore = 0; }
-                File.WriteAllText(scoreFilePath, JsonSerializer.Serialize(new { score = initialScore }));
+                WriteScoreFileAtomic(scoreFilePath, initialScore, "Startup");
                 lastExportedScore = initialScore;
                 Console.WriteLine($"[ConsoleTest] Initialized score file '{scoreFilePath}' with score {initialScore}");
             }
@@ -79,7 +79,11 @@ namespace SnakeGame
             {
                 Console.WriteLine($"[ConsoleTest] Failed to initialize score file '{scoreFilePath}': {ex.GetType().Name}: {ex.Message}");
             }
+
+            // Track previous state so we only export on state transition to GameOver
+            State previousState = state;
             state = State.Title;
+
             while (true)
             {
                 if (state == State.Title)
@@ -119,44 +123,107 @@ namespace SnakeGame
                         var key = Console.ReadKey(true).Key;
                         bool stateChanged = false;
                         currentGame.HandleInput(key, ref stateChanged);
+
+                        // If the game signalled a state change (Escape -> true), return to title screen.
+                        if (stateChanged)
+                        {
+                            state = State.Title;
+                            // Optionally reset or re-initialize visuals for the title screen next loop
+                            // currentGame = games[game]; // keep current selection
+                        }
                     }
 
                     // Update current game
                     currentGame.Update(pixels);
 
-                    try
+                    // NEW: ask the game if it's over (if it exposes IsGameOver)
+                    var mg = currentGame.GetType().GetMethod("IsGameOver");
+                    if (mg != null)
                     {
-                        int currentScore = currentGame.GetScore();
-                        if (currentScore != lastExportedScore)
+                        try
                         {
-                            // Write new score and log success/failure
-                            try
+                            var result = mg.Invoke(currentGame, null);
+                            if (result is bool b && b)
                             {
-                                File.WriteAllText(scoreFilePath, JsonSerializer.Serialize(new { score = currentScore }));
-                                lastExportedScore = currentScore;
-                                Console.WriteLine($"[ConsoleTest] Exported score {currentScore} -> {scoreFilePath}");
-                            }
-                            catch (Exception ex)
-                            {
-                                Console.WriteLine($"[ConsoleTest] Failed to write score to '{scoreFilePath}': {ex.GetType().Name}: {ex.Message}");
+                                state = State.GameOver;
                             }
                         }
-                    }
-                    catch
-                    {
-                        // ignore game GetScore errors
+                        catch { /* ignore reflection call errors */ }
                     }
 
-                    // Display score (only for Snake in original)
-                    if (game == GameChoiceState.Snake)
+                    // IMPORTANT: Do NOT write score on every point update.
+                    // Keep score local in the game and only export when the game transitions to GameOver.
+                }
+
+                // Detect state transitions and export final score only when the game ends
+                if (previousState != state)
+                {
+                    Console.WriteLine($"[ConsoleTest] State changed {previousState} -> {state}");
+                    if (state == State.GameOver)
+                    {
+                        try
+                        {
+                            int finalScore = 0;
+                            try { finalScore = currentGame?.GetScore() ?? 0; } catch { finalScore = 0; }
+                            WriteScoreFileAtomic(scoreFilePath, finalScore, "GameOver");
+                            lastExportedScore = finalScore;
+                            Console.WriteLine($"[ConsoleTest] Final score exported {finalScore} -> {scoreFilePath}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[ConsoleTest] Failed to write final score to '{scoreFilePath}': {ex.GetType().Name}: {ex.Message}");
+                        }
+                    }
+                    previousState = state;
+                }
+
+                // Display score (only for Snake in original)
+                if (game == GameChoiceState.Snake)
+                {
+                    try
                     {
                         emulatorDisplay.DisplayInt(currentGame.GetScore());
                         //hardwareDisplay.DisplayInt(currentGame.GetScore());               <-- Uncomment when hardware display is available
                     }
+                    catch { }
                 }
 
                 emulatorDisplay.Draw(pixels);
                 //hardwareDisplay.Draw(pixels);                                             <-- Uncomment when hardware display is available
+            }
+        }
+
+        // Writes the score, an ISO-8601 UTC timestamp and optional state atomically.
+        static void WriteScoreFileAtomic(string path, int score, string state = null)
+        {
+            var payload = new
+            {
+                score = score,
+                state = state,
+                // DateTimeOffset serializes as an ISO 8601 string by System.Text.Json by default.
+                timestamp = DateTimeOffset.UtcNow
+            };
+
+            var json = JsonSerializer.Serialize(payload);
+
+            // Ensure directory exists
+            var dir = Path.GetDirectoryName(path);
+            if (string.IsNullOrEmpty(dir))
+                dir = AppContext.BaseDirectory;
+            Directory.CreateDirectory(dir);
+
+            // Write to a temp file in the same directory then replace target to avoid partial reads.
+            var tmp = Path.Combine(dir, $"{Guid.NewGuid():N}.tmp");
+            File.WriteAllText(tmp, json);
+
+            try
+            {
+                // Copy over (overwrite) and remove temp. Copy is used for cross-platform safety.
+                File.Copy(tmp, path, overwrite: true);
+            }
+            finally
+            {
+                try { File.Delete(tmp); } catch { }
             }
         }
     }
