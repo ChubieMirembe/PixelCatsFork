@@ -113,8 +113,7 @@ namespace SnakeGame
                 {
                     Thread.Sleep(100);
 
-                    // Check for input (only Snake needs it in Playing state)
-                    if (Console.KeyAvailable)
+                    while (Console.KeyAvailable)
                     {
                         var key = Console.ReadKey(true).Key;
                         bool stateChanged = false;
@@ -147,12 +146,10 @@ namespace SnakeGame
                         // ignore game GetScore errors
                     }
 
-                    // Display score (only for Snake in original)
-                    if (game == GameChoiceState.Snake)
-                    {
-                        emulatorDisplay.DisplayInt(currentGame.GetScore());
-                        //hardwareDisplay.DisplayInt(currentGame.GetScore());               <-- Uncomment when hardware display is available
-                    }
+                    // Display score 
+                    emulatorDisplay.DisplayInt(currentGame.GetScore());
+                    //hardwareDisplay.DisplayInt(currentGame.GetScore());                    <-- Uncomment when hardware display is available
+                    
                 }
 
                 emulatorDisplay.Draw(pixels);
