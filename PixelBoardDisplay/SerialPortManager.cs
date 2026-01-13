@@ -24,19 +24,19 @@ namespace PixelBoard
                 }
                 catch (UnauthorizedAccessException e)
                 {
-
+                    Console.WriteLine($"Error: {e.Message}");
                 }
                 catch (InvalidOperationException e)
                 {
-
+                    Console.WriteLine($"Error: {e.Message}");
                 }
                 catch (System.IO.IOException e)
                 {
-
+                    Console.WriteLine($"Error: {e.Message}");
                 }
                 catch (Exception e)
                 {
-
+                    Console.WriteLine($"Error: {e.Message}");
                 }
                 Thread.Sleep(1);
             }
