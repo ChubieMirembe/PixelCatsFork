@@ -1,11 +1,11 @@
 ﻿using Microsoft.Extensions.Configuration;
 using PixelBoard;
-using SnakeGame.Games;
 using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.IO;
 using System.Text.Json;
+using ConsoleTest.Games;
 
 namespace SnakeGame
 {
