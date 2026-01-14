@@ -71,7 +71,7 @@ namespace SnakeGame
             {
                 int initialScore = 0;
                 try { initialScore = currentGame?.GetScore() ?? 0; } catch { initialScore = 0; }
-                WriteScoreFileAtomic(scoreFilePath, initialScore, "Startup", null);
+                WriteScoreFileAtomic(scoreFilePath, initialScore, currentGame, "Startup", null);
                 lastExportedScore = initialScore;
                 Console.WriteLine($"[ConsoleTest] Initialized score file '{scoreFilePath}' with score {initialScore}");
             }
@@ -153,32 +153,29 @@ namespace SnakeGame
                     // Get the code before returning to title
                     lastGameOverCode = currentGame.GetGameOverCode();
 
+                    // Export final score immediately while we still have the final game state
+                    try
+                    {
+                        int finalScore = currentGame.GetScore();
+                        WriteScoreFileAtomic(scoreFilePath, finalScore, currentGame, "GameOver", lastGameOverCode);
+                        lastExportedScore = finalScore;
+                        Console.WriteLine($"[ConsoleTest] Final score exported:  {finalScore}, Code: {lastGameOverCode} -> {scoreFilePath}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[ConsoleTest] Failed to write final score to '{scoreFilePath}': {ex.GetType().Name}: {ex.Message}");
+                    }
+
                     Thread.Sleep(1000); // Show game over screen for 1 second
 
                     Console.WriteLine($"[ConsoleTest] Returning to title screen with code {lastGameOverCode}");
                     state = State.Title;
                 }
 
-                // Detect state transitions and export final score only when the game ends
+                // Detect state transitions (logging only). Final-score export is handled in the GameOver block.
                 if (previousState != state)
                 {
                     Console.WriteLine($"[ConsoleTest] State changed {previousState} -> {state}");
-                    if (state == State.GameOver)
-                    {
-                        try
-                        {
-                            int finalScore = currentGame.GetScore();
-                            string gameOverCode = currentGame.GetGameOverCode();
-
-                            WriteScoreFileAtomic(scoreFilePath, finalScore, "GameOver", gameOverCode);
-                            lastExportedScore = finalScore;
-                            Console.WriteLine($"[ConsoleTest] Final score exported:  {finalScore}, Code: {gameOverCode} -> {scoreFilePath}");
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"[ConsoleTest] Failed to write final score to '{scoreFilePath}': {ex.GetType().Name}: {ex.Message}");
-                        }
-                    }
                     previousState = state;
                 }
 
@@ -205,13 +202,14 @@ namespace SnakeGame
         }
 
         // Writes the score, code, an ISO-8601 UTC timestamp and optional state atomically.
-        static void WriteScoreFileAtomic(string path, int score, string state = null, string code = null)
+        static void WriteScoreFileAtomic(string path, int score, IGame game, string state = null, string code = null)
         {
             var payload = new
             {
                 score = score,
                 state = state,
                 code = code,
+                gameName = game.ToString(),
                 timestamp = DateTimeOffset.UtcNow.ToString("O")
             };
 
