@@ -212,6 +212,7 @@ namespace SnakeGame
                 score = score,
                 state = state,
                 code = code,
+                gameName = game,
                 timestamp = DateTimeOffset.UtcNow.ToString("O")
             };
 
