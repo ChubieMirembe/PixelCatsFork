@@ -167,7 +167,7 @@ class Program
 
                 if (evt == null) continue;
 
-                var (score, timestamp, state, code) = await TryReadScoreWithTimestampAsync(filePath, ct);
+                var (score, timestamp, state, code, gameName) = await TryReadScoreWithTimestampAsync(filePath, ct);
                 if (!score.HasValue || !timestamp.HasValue)
                     continue;
 
@@ -189,8 +189,8 @@ class Program
                 if (!sharedTs.TryClaim(tsMs))
                     continue;
 
-                Console.WriteLine($"Detected new score write at {timestamp.Value:u}.  Score={score.Value}, Code={code}");
-                var ok = await SubmitCodeAsync(code, score.Value, apiKey);
+                Console.WriteLine($"Detected new score write at {timestamp.Value:u}.  Score={score.Value}, Code={code}, Game={gameName ?? "<unknown>"}");
+                var ok = await SubmitCodeAsync(code, score.Value, gameName, apiKey);
                 Console.WriteLine(ok ? "Code+score submitted!" : "Failed to submit code+score");
 
                 // Optionally print leaderboard after submit
@@ -237,7 +237,7 @@ class Program
                     // quick check against shared baseline (avoid expensive parsing if not newer)
                     if (writeMs > sharedTs.Read())
                     {
-                        var (score, timestamp, state, code) = await TryReadScoreWithTimestampAsync(filePath, ct);
+                        var (score, timestamp, state, code, gameName) = await TryReadScoreWithTimestampAsync(filePath, ct);
                         timestamp ??= DateTimeOffset.FromUnixTimeMilliseconds(writeMs);
 
                         // Only process final/game-over writes
@@ -262,8 +262,8 @@ class Program
                             if (!sharedTs.TryClaim(tsMs))
                                 continue;
 
-                            Console.WriteLine($"Poller detected new score write at {timestamp.Value:u}. Score={score.Value}, Code={code}");
-                            var ok = await SubmitCodeAsync(code, score.Value, apiKey);
+                            Console.WriteLine($"Poller detected new score write at {timestamp.Value:u}. Score={score.Value}, Code={code}, Game={gameName ?? "<unknown>"}");
+                            var ok = await SubmitCodeAsync(code, score.Value, gameName, apiKey);
                             Console.WriteLine(ok ? "Code+score submitted!" : "Failed to submit code+score");
 
                             var scores = await GetTopScoresAsync(limit: 10);
@@ -288,9 +288,9 @@ class Program
         }
     }
 
-    // Attempts to read "score", "code", optional "state" and a timestamp property if present.
+    // Attempts to read "score", "code", optional "state", "gameName" and a timestamp property if present.
     // Supports timestamp as ISO string or numeric unix seconds/milliseconds.
-    static async Task<(int? score, DateTimeOffset? timestamp, string state, string code)> TryReadScoreWithTimestampAsync(string path, CancellationToken ct)
+    static async Task<(int? score, DateTimeOffset? timestamp, string state, string code, string gameName)> TryReadScoreWithTimestampAsync(string path, CancellationToken ct)
     {
         // Try a few times in case the game is still writing the file.
         for (int attempt = 0; attempt < 6; attempt++)
@@ -300,14 +300,14 @@ class Program
             try
             {
                 if (!File.Exists(path))
-                    return (null, null, null, null);
+                    return (null, null, null, null, null);
 
                 // Open with shared read so we don't lock the writer
                 using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
                 using var sr = new StreamReader(fs);
                 var json = await sr.ReadToEndAsync();
                 if (string.IsNullOrWhiteSpace(json))
-                    return (null, null, null, null);
+                    return (null, null, null, null, null);
 
                 using var doc = JsonDocument.Parse(json);
                 var root = doc.RootElement;
@@ -316,6 +316,7 @@ class Program
                 DateTimeOffset? timestamp = null;
                 string state = null;
                 string code = null;
+                string gameName = null;
 
                 if (root.TryGetProperty("score", out var scoreProp) && scoreProp.ValueKind == JsonValueKind.Number)
                 {
@@ -331,6 +332,25 @@ class Program
                 if (root.TryGetProperty("code", out var codeProp) && codeProp.ValueKind == JsonValueKind.String)
                 {
                     code = codeProp.GetString();
+                }
+
+                if (root.TryGetProperty("gameName", out var gnProp) && gnProp.ValueKind == JsonValueKind.String)
+                {
+                    gameName = gnProp.GetString();
+
+                    // Normalize fully-qualified game names like "ConsoleTest.Games.Snake"
+                    // to just "Snake". If gameName already looks simple, this is a no-op.
+                    if (!string.IsNullOrWhiteSpace(gameName))
+                    {
+                        gameName = gameName.Trim();
+
+                        // If it's a dotted name, take the last segment.
+                        int lastDot = gameName.LastIndexOf('.');
+                        if (lastDot >= 0 && lastDot < gameName.Length - 1)
+                        {
+                            gameName = gameName.Substring(lastDot + 1);
+                        }
+                    }
                 }
 
                 // look for common timestamp fields
@@ -367,7 +387,7 @@ class Program
                     timestamp = File.GetLastWriteTimeUtc(path);
                 }
 
-                return (score, timestamp, state, code);
+                return (score, timestamp, state, code, gameName);
             }
             catch (JsonException)
             {
@@ -380,22 +400,23 @@ class Program
             catch (Exception ex)
             {
                 Console.WriteLine($"Error reading score file: {ex.Message}");
-                return (null, null, null, null);
+                return (null, null, null, null, null);
             }
 
             await Task.Delay(200, ct);
         }
 
-        return (null, null, null, null);
+        return (null, null, null, null, null);
     }
 
-    static async Task<bool> SubmitCodeAsync(string code, int score, string apiKey = null)
+    static async Task<bool> SubmitCodeAsync(string code, int score, string gameName, string apiKey = null)
     {
         using var http = new HttpClient { BaseAddress = new Uri(ApiBase) };
         if (!string.IsNullOrEmpty(apiKey))
             http.DefaultRequestHeaders.Add("x-api-key", apiKey);
 
-        var payload = new { code, score };
+        // include gameName if present; server should ignore unknown fields if it doesn't need them.
+        var payload = new { code, score, gameName };
         HttpResponseMessage resp;
         try
         {
