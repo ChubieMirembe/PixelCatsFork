@@ -6,6 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="Games\Snake Tutorial\Snake_tutorial.cs" />
     <Compile Remove="Games\Snake_tutorial.cs" />
   </ItemGroup>
 
