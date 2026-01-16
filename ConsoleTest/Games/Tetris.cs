@@ -257,12 +257,22 @@ namespace ConsoleTest.Games
             pieceY = 0;
             frameCounter = 0;
 
-            // Clear console input buffer to prevent buffered keys from affecting new piece
-            while (Console.KeyAvailable)
+            // Clear console input buffer to prevent buffered keys from affecting new piece.
+            // In CI/headless test runs, Console.KeyAvailable can throw InvalidOperationException,
+            // so guard it and simply skip clearing when no console is available.
+            try
             {
-                Console.ReadKey(true);
+                while (Console.KeyAvailable)
+                {
+                    Console.ReadKey(true);
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                // No interactive console (e.g., CI runner / redirected input). Safe to ignore.
             }
         }
+
 
         private bool MovePiece(int dx, int dy)
         {
