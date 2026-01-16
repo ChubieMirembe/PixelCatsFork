@@ -9,6 +9,7 @@ on:
 jobs:
   build-and-test:
     runs-on: windows-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -18,13 +19,11 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
-      - name: Restore
-        run: dotnet restore
+      - name: Restore solution
+        run: dotnet restore PixelGame.sln
 
-      - name: Build (allow warnings)
-        # Temporarily disable treating warnings as errors so CI can run the unit tests
-        run: dotnet build --no-restore --configuration Release -p:TreatWarningsAsErrors=false
+      - name: Build solution (Release, allow warnings)
+        run: dotnet build PixelGame.sln --no-restore --configuration Release -p:TreatWarningsAsErrors=false
 
       - name: Run unit tests (exclude integration)
-        # Use --no-build because we already built above
-        run: dotnet test ConsoleTest.Tests/ConsoleTest.Tests.csproj --no-build --verbosity normal --filter "Category!=Integration"
+        run: dotnet test PixelGame.sln --no-build --configuration Release --verbosity normal --filter "Category!=Integration"
