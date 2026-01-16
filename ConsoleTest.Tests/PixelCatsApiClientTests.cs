@@ -1,8 +1,8 @@
-﻿using ConsoleTest.Tests;
+﻿#nullable enable
+
 using System;
 using System.Net;
 using System.Net.Http;
-using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,16 +12,17 @@ using Xunit;
 namespace ConsoleTest.Tests
 {
     // Very small fake handler for deterministic responses
-    internal class FakeHttpMessageHandler : HttpMessageHandler
+    internal sealed class FakeHttpMessageHandler : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, HttpResponseMessage> _responder;
-        public FakeHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) => _responder = responder;
+        public FakeHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responder)
+            => _responder = responder ?? throw new ArgumentNullException(nameof(responder));
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => Task.FromResult(_responder(request));
     }
 
-    public class PixelCatsApiClientTests
+    public sealed class PixelCatsApiClientTests
     {
         [Fact]
         public async Task SubmitCodeAsync_ReturnsTrue_On200()
@@ -29,14 +30,18 @@ namespace ConsoleTest.Tests
             var handler = new FakeHttpMessageHandler(req =>
             {
                 Assert.Equal(HttpMethod.Post, req.Method);
-                Assert.Equal("/api/codes", req.RequestUri?.PathAndQuery);
+
+                // Avoid nullable warning by asserting non-null before using it
+                Assert.NotNull(req.RequestUri);
+                Assert.Equal("/api/codes", req.RequestUri!.PathAndQuery);
+
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent("{\"ok\":true}")
                 };
             });
 
-            var http = new HttpClient(handler) { BaseAddress = new Uri("http://api.test") };
+            using var http = new HttpClient(handler) { BaseAddress = new Uri("http://api.test") };
             var client = new PixelCatsApiClient(http);
 
             var ok = await client.SubmitCodeAsync("ABC123", 9001, "Tetris", "key");
@@ -46,13 +51,14 @@ namespace ConsoleTest.Tests
         [Fact]
         public async Task SubmitCodeAsync_ReturnsFalse_OnServerError()
         {
-            var handler = new FakeHttpMessageHandler(req =>
+            var handler = new FakeHttpMessageHandler(_ =>
                 new HttpResponseMessage(HttpStatusCode.InternalServerError));
 
-            var http = new HttpClient(handler) { BaseAddress = new Uri("http://api.test") };
+            using var http = new HttpClient(handler) { BaseAddress = new Uri("http://api.test") };
             var client = new PixelCatsApiClient(http);
 
-            var ok = await client.SubmitCodeAsync("X", 1, null);
+            // Fixes CS8625: SubmitCodeAsync now requires non-null gameName, so pass a real value.
+            var ok = await client.SubmitCodeAsync("X", 1, "Tetris");
             Assert.False(ok);
         }
 
@@ -75,12 +81,12 @@ namespace ConsoleTest.Tests
                 };
             });
 
-            var http = new HttpClient(handler) { BaseAddress = new Uri("http://api.test") };
+            using var http = new HttpClient(handler) { BaseAddress = new Uri("http://api.test") };
             var client = new PixelCatsApiClient(http);
 
+            // Client now guarantees non-null array
             var results = await client.GetTopScoresAsync(2);
 
-            Assert.NotNull(results);
             Assert.Equal(2, results.Length);
             Assert.Equal("Alice", results[0].name);
             Assert.Equal(100, results[0].score);

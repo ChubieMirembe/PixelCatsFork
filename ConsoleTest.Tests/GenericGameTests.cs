@@ -1,7 +1,8 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using ConsoleTest.Games;
 using Xunit;
 using PixelBoard;
@@ -9,14 +10,14 @@ using PixelBoard;
 namespace ConsoleTest.Tests
 {
     // Minimal IPixel implementation used by all tests
-    internal class TestPixel : IPixel
+    internal sealed class TestPixel : IPixel
     {
         public byte Red { get; set; }
         public byte Green { get; set; }
         public byte Blue { get; set; }
     }
 
-    public class GenericGameTests
+    public sealed class GenericGameTests
     {
         private static IPixel[,] CreatePixelBuffer()
         {
@@ -49,7 +50,12 @@ namespace ConsoleTest.Tests
         {
             // Arrange
             var pixels = CreatePixelBuffer();
-            var game = (IGame)Activator.CreateInstance(gameType);
+
+            // Fixes CS8600/CS8602: CreateInstance can return null -> assert first
+            var instance = Activator.CreateInstance(gameType);
+            Assert.NotNull(instance);
+
+            var game = (IGame)instance!;
 
             // Act - call title and initialize (should not throw)
             game.DrawTitle(pixels);
@@ -57,9 +63,7 @@ namespace ConsoleTest.Tests
 
             // Act - call Update a few times to exercise drawing/logic
             for (int i = 0; i < 10; i++)
-            {
                 game.Update(pixels);
-            }
 
             // Act - send a few inputs (soft-drop, rotate, escape)
             bool stateChanged = false;
@@ -77,7 +81,7 @@ namespace ConsoleTest.Tests
             }
             else
             {
-                Assert.True(code == null || code.Length > 0);
+                Assert.True(code is null || code.Length > 0);
             }
         }
     }

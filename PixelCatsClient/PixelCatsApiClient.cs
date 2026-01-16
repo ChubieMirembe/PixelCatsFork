@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
@@ -7,7 +9,7 @@ namespace PixelCatsClient
 {
     public record ScoreRecord(int id, string name, int score, string created_at);
 
-    public class PixelCatsApiClient
+    public sealed class PixelCatsApiClient
     {
         private readonly HttpClient _http;
 
@@ -16,9 +18,11 @@ namespace PixelCatsClient
             _http = http ?? throw new ArgumentNullException(nameof(http));
         }
 
-        public async Task<bool> SubmitCodeAsync(string code, int score, string gameName, string apiKey = null)
+        // Fixes CS8625 by making apiKey nullable
+        public async Task<bool> SubmitCodeAsync(string code, int score, string gameName, string? apiKey = null)
         {
             if (string.IsNullOrEmpty(code)) throw new ArgumentException("code required", nameof(code));
+            if (string.IsNullOrEmpty(gameName)) throw new ArgumentException("gameName required", nameof(gameName));
 
             if (!string.IsNullOrEmpty(apiKey))
             {
@@ -28,36 +32,42 @@ namespace PixelCatsClient
             }
 
             var payload = new { code, score, gameName };
+
+            try
+            {
+                var resp = await _http.PostAsJsonAsync("/api/codes", payload).ConfigureAwait(false);
+                return resp.IsSuccessStatusCode;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        // Fixes CS8603 by returning a non-null array always
+        public async Task<ScoreRecord[]> GetTopScoresAsync(int limit = 10)
+        {
             HttpResponseMessage resp;
             try
             {
-                resp = await _http.PostAsJsonAsync("/api/codes", payload);
+                resp = await _http.GetAsync($"/api/leaderboard?limit={limit}").ConfigureAwait(false);
             }
             catch
             {
-                return false;
+                return Array.Empty<ScoreRecord>();
             }
 
             if (!resp.IsSuccessStatusCode)
-                return false;
-
-            return true;
-        }
-
-        public async Task<ScoreRecord[]> GetTopScoresAsync(int limit = 10)
-        {
-            var resp = await _http.GetAsync($"/api/leaderboard?limit={limit}");
-            if (!resp.IsSuccessStatusCode)
-                return null;
+                return Array.Empty<ScoreRecord>();
 
             try
             {
-                var data = await resp.Content.ReadFromJsonAsync<ScoreRecord[]>();
-                return data;
+                var data = await resp.Content.ReadFromJsonAsync<ScoreRecord[]>().ConfigureAwait(false);
+                return data ?? Array.Empty<ScoreRecord>();
             }
             catch
             {
-                return null;
+                return Array.Empty<ScoreRecord>();
             }
         }
     }
