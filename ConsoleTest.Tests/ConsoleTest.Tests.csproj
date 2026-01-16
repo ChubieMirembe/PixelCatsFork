@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ConsoleTest\ConsoleTest.csproj" />
+    <ProjectReference Include="..\PixelCatsClient\PixelCatsClient.csproj" />
   </ItemGroup>
 
   <ItemGroup>
