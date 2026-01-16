@@ -1,4 +1,6 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿#nullable enable
+
+using Microsoft.Extensions.Configuration;
 using PixelBoard;
 using System;
 using System.Collections.Generic;
@@ -9,41 +11,46 @@ using ConsoleTest.Games;
 
 namespace SnakeGame
 {
-    class Program
+    internal class Program
     {
-        public enum State { Title, Playing, GameOver };
+        public enum State { Title, Playing, GameOver }
         public static State state = State.Title;
-        public enum GameChoiceState { Snake, Tetris, Education };
+
+        public enum GameChoiceState { Snake, Tetris, Education }
         public static GameChoiceState game = GameChoiceState.Snake;
 
-        public static IConfiguration _config = null;
-        private static IPixel[,] pixels = new IPixel[20, 10];
-        private static Dictionary<GameChoiceState, IGame> games;
-        private static IGame currentGame;
+        // Fix CS8625: don't assign null to non-nullable
+        public static IConfiguration? _config;
 
-        static void Main(string[] args)
+        private static readonly IPixel[,] pixels = new IPixel[20, 10];
+
+        // Fix CS8618: these are initialized in Main, so make them nullable (or initialize here)
+        private static Dictionary<GameChoiceState, IGame>? games;
+        private static IGame? currentGame;
+
+        private static void Main(string[] args)
         {
-            // Load configuration (safer version)
+            // Fix filename typo: "appsettings. json" -> "appsettings.json"
             _config = new ConfigurationBuilder()
-                .AddJsonFile("appsettings. json", optional: true, reloadOnChange: true)
+                .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
                 .Build();
 
             bool useEmulator = true;
             var useEmulatorValue = _config["UseEmulator"];
             if (!string.IsNullOrEmpty(useEmulatorValue))
             {
-                bool.TryParse(useEmulatorValue, out useEmulator);
+                _ = bool.TryParse(useEmulatorValue, out useEmulator);
             }
 
             IDisplay emulatorDisplay = new ConsoleDisplay();
-            //IDisplay hardwareDisplay = new ArduinoDisplay();                      //<-- Uncomment when hardware display is available
+            // IDisplay hardwareDisplay = new ArduinoDisplay(); // Uncomment when hardware display is available
 
             // Initialize games
             games = new Dictionary<GameChoiceState, IGame>
             {
-                { GameChoiceState. Snake, new Snake() },
+                { GameChoiceState.Snake, new Snake() },
                 { GameChoiceState.Tetris, new Tetris() },
-                { GameChoiceState. Education, new Education() }
+                { GameChoiceState.Education, new Education() }
             };
 
             currentGame = games[game];
@@ -58,7 +65,6 @@ namespace SnakeGame
             }
             catch
             {
-                // fallback to local folder if something goes wrong
                 sharedDir = Path.Combine(AppContext.BaseDirectory, "shared");
                 Directory.CreateDirectory(sharedDir);
             }
@@ -69,26 +75,34 @@ namespace SnakeGame
             // Ensure the file exists at startup with the current game's score (safe fallback to 0)
             try
             {
-                int initialScore = 0;
-                try { initialScore = currentGame?.GetScore() ?? 0; } catch { initialScore = 0; }
-                WriteScoreFileAtomic(scoreFilePath, initialScore, currentGame, "Startup", null);
+                // Fix CS8604: currentGame is nullable, so guard it once and keep a non-null local
+                var gameLocal = currentGame ?? throw new InvalidOperationException("Current game was not initialized.");
+
+                int initialScore;
+                try { initialScore = gameLocal.GetScore(); } catch { initialScore = 0; }
+
+                // Fix CS8625 at call-site by using nullable parameters in signature (see method below)
+                WriteScoreFileAtomic(scoreFilePath, initialScore, gameLocal, state: "Startup", code: null);
+
                 lastExportedScore = initialScore;
                 Console.WriteLine($"[ConsoleTest] Initialized score file '{scoreFilePath}' with score {initialScore}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ConsoleTest] Failed to initialize score file '{scoreFilePath}':  {ex.GetType().Name}: {ex.Message}");
+                Console.WriteLine($"[ConsoleTest] Failed to initialize score file '{scoreFilePath}': {ex.GetType().Name}: {ex.Message}");
             }
 
-            // Track previous state so we only export on state transition to GameOver
             State previousState = state;
             state = State.Title;
 
-            // Track the last game over code to display on title screen
-            string lastGameOverCode = null;
+            // Fix CS8600: declare as nullable
+            string? lastGameOverCode = null;
 
             while (true)
             {
+                // Fix CS8600/CS8602 patterns by working with non-null locals inside the loop
+                var gameLocal = currentGame ?? throw new InvalidOperationException("Current game was not initialized.");
+
                 if (state == State.Title)
                 {
                     if (Console.KeyAvailable)
@@ -99,47 +113,44 @@ namespace SnakeGame
                         {
                             case ConsoleKey.S:
                                 state = State.Playing;
-                                currentGame.Initialize(pixels);
-                                lastGameOverCode = null; // Clear the code when starting a new game
+                                gameLocal.Initialize(pixels);
+                                lastGameOverCode = null;
                                 break;
+
                             case ConsoleKey.A:
                                 game = (GameChoiceState)(((int)game + 2) % 3);
-                                currentGame = games[game];
+                                currentGame = games![game];
                                 break;
+
                             case ConsoleKey.D:
                                 game = (GameChoiceState)(((int)game + 1) % 3);
-                                currentGame = games[game];
+                                currentGame = games![game];
                                 break;
                         }
                     }
 
-                    // Draw title for current game
-                    currentGame.DrawTitle(pixels);
+                    gameLocal.DrawTitle(pixels);
                 }
 
                 if (state == State.Playing)
                 {
                     Thread.Sleep(100);
 
-                    // Check for input
                     if (Console.KeyAvailable)
                     {
                         var key = Console.ReadKey(true).Key;
                         bool stateChanged = false;
-                        currentGame.HandleInput(key, ref stateChanged);
+                        gameLocal.HandleInput(key, ref stateChanged);
 
-                        // If the game signalled a state change (Escape -> true), return to title screen.
                         if (stateChanged)
                         {
                             state = State.Title;
                         }
                     }
 
-                    // Update current game
-                    currentGame.Update(pixels);
+                    gameLocal.Update(pixels);
 
-                    // Check if game is over using the IsGameOver method
-                    if (currentGame.IsGameOver())
+                    if (gameLocal.IsGameOver())
                     {
                         state = State.GameOver;
                     }
@@ -147,87 +158,79 @@ namespace SnakeGame
 
                 if (state == State.GameOver)
                 {
-                    // Show game over screen briefly (1 second)
-                    currentGame.Update(pixels);
+                    gameLocal.Update(pixels);
 
-                    // Get the code before returning to title
-                    lastGameOverCode = currentGame.GetGameOverCode();
+                    lastGameOverCode = gameLocal.GetGameOverCode();
 
-                    // Export final score immediately while we still have the final game state
                     try
                     {
-                        int finalScore = currentGame.GetScore();
-                        WriteScoreFileAtomic(scoreFilePath, finalScore, currentGame, "GameOver", lastGameOverCode);
+                        int finalScore = gameLocal.GetScore();
+                        WriteScoreFileAtomic(scoreFilePath, finalScore, gameLocal, state: "GameOver", code: lastGameOverCode);
                         lastExportedScore = finalScore;
-                        Console.WriteLine($"[ConsoleTest] Final score exported:  {finalScore}, Code: {lastGameOverCode} -> {scoreFilePath}");
+                        Console.WriteLine($"[ConsoleTest] Final score exported: {finalScore}, Code: {lastGameOverCode} -> {scoreFilePath}");
                     }
                     catch (Exception ex)
                     {
                         Console.WriteLine($"[ConsoleTest] Failed to write final score to '{scoreFilePath}': {ex.GetType().Name}: {ex.Message}");
                     }
 
-                    Thread.Sleep(1000); // Show game over screen for 1 second
+                    Thread.Sleep(1000);
 
                     Console.WriteLine($"[ConsoleTest] Returning to title screen with code {lastGameOverCode}");
                     state = State.Title;
                 }
 
-                // Detect state transitions (logging only). Final-score export is handled in the GameOver block.
                 if (previousState != state)
                 {
                     Console.WriteLine($"[ConsoleTest] State changed {previousState} -> {state}");
                     previousState = state;
                 }
 
-                // Display code on title screen if available, otherwise display current score
                 if (!string.IsNullOrEmpty(lastGameOverCode) && state == State.Title)
                 {
-                    // Display the last game over code on title screen
                     if (int.TryParse(lastGameOverCode, out int codeInt))
                     {
                         emulatorDisplay.DisplayInt(codeInt);
-                        //hardwareDisplay.DisplayInt(codeInt);
+                        // hardwareDisplay.DisplayInt(codeInt);
                     }
                 }
                 else
                 {
-                    // Display current score during gameplay
-                    emulatorDisplay.DisplayInt(currentGame.GetScore());
-                    //hardwareDisplay.DisplayInt(currentGame.GetScore());
+                    emulatorDisplay.DisplayInt(gameLocal.GetScore());
+                    // hardwareDisplay.DisplayInt(gameLocal.GetScore());
                 }
 
                 emulatorDisplay.Draw(pixels);
-                //hardwareDisplay.Draw(pixels);                                            // <-- Uncomment when hardware display is available
+                // hardwareDisplay.Draw(pixels);
             }
         }
 
-        // Writes the score, code, an ISO-8601 UTC timestamp and optional state atomically.
-        static void WriteScoreFileAtomic(string path, int score, IGame game, string state = null, string code = null)
+        // Fix CS8625: allow null for optional params by making them nullable.
+        // Also avoids CS8604 by accepting IGame? and coalescing safely.
+        private static void WriteScoreFileAtomic(string path, int score, IGame? game, string? state = null, string? code = null)
         {
             var payload = new
             {
-                score = score,
-                state = state,
-                code = code,
-                gameName = game.ToString(),
+                score,
+                state,
+                code,
+                gameName = game?.ToString() ?? string.Empty,
                 timestamp = DateTimeOffset.UtcNow.ToString("O")
             };
 
             var json = JsonSerializer.Serialize(payload);
 
-            // Ensure directory exists
             var dir = Path.GetDirectoryName(path);
             if (string.IsNullOrEmpty(dir))
                 dir = AppContext.BaseDirectory;
+
             Directory.CreateDirectory(dir);
 
-            // Write to a temp file in the same directory then replace target to avoid partial reads. 
             var tmp = Path.Combine(dir, $"{Guid.NewGuid():N}.tmp");
             File.WriteAllText(tmp, json);
 
             try
             {
-                // Copy over (overwrite) and remove temp. Copy is used for cross-platform safety.
                 File.Copy(tmp, path, overwrite: true);
             }
             finally
