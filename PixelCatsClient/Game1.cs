@@ -59,7 +59,7 @@ namespace PixelCatsClient
                 watcherPath = "latest_score.json";
             }
 
-            Console.WriteLine($"[Game1] Starting ScoreWatcher for: {watcherPath} (exists: {File.Exists(watcherPath)})");
+            //Console.WriteLine($"[Game1] Starting ScoreWatcher for: {watcherPath} (exists: {File.Exists(watcherPath)})");
 
             _watcher = new ScoreWatcher(watcherPath);
             _watcher.NewScoreDetected += OnNewScoreDetected;

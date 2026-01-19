@@ -27,7 +27,7 @@ namespace PixelCatsClient
             _cts = new CancellationTokenSource();
 
             // Small, safe log so you can confirm the watcher path without changing behavior
-            Console.WriteLine($"[ScoreWatcher] Starting watcher for: {_filePath} (exists: {File.Exists(_filePath)})");
+            //Console.WriteLine($"[ScoreWatcher] Starting watcher for: {_filePath} (exists: {File.Exists(_filePath)})");
 
             _ = RunAsync(_cts.Token);
         }
@@ -52,7 +52,7 @@ namespace PixelCatsClient
             catch (Exception ex)
             {
                 // don't fail startup if timestamp read fails
-                Console.WriteLine($"[ScoreWatcher] Warning reading initial write time: {ex.Message}");
+                //Console.WriteLine($"[ScoreWatcher] Warning reading initial write time: {ex.Message}");
             }
             while (!ct.IsCancellationRequested)
             {
