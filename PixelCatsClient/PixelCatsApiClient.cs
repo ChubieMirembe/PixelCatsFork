@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace PixelCatsClient
 {
-    public record ScoreRecord(int id, string name, int score, string created_at);
+    public record ScoreRecord(int id, string name, int score, string created_at, string gameName);
 
     public sealed class PixelCatsApiClient
     {
@@ -45,7 +45,7 @@ namespace PixelCatsClient
         }
 
         // Fixes CS8603 by returning a non-null array always
-        public async Task<ScoreRecord[]> GetTopScoresAsync(int limit = 10)
+        public async Task<ScoreRecord[]> GetTopScoresAsync(int limit = 8)
         {
             HttpResponseMessage resp;
             try
