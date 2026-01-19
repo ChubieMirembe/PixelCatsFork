@@ -1,12 +1,13 @@
-using PixelBoard;
+﻿using PixelBoard;
 using System;
 using System.Drawing;
 
-namespace SnakeGame.Games
+namespace ConsoleTest.Games
 {
     public class Tetris : IGame
     {
         private int score = 0;
+        private int level = 0;  // Level for authentic scoring
         private int[,] board = new int[20, 10]; // 0 = empty, 1+ = filled
         private Tetromino currentPiece;
         private int pieceX;
@@ -15,6 +16,9 @@ namespace SnakeGame.Games
         private int frameCounter = 0;
         private int dropSpeed = 10; // Frames before piece drops
         private bool gameOver = false;
+        private int manualDropCooldown = 0;
+        private int rotateCooldown = 0;  // Rotation cooldown
+        private string gameOverCode = null;  // Game over code
 
         // Tetromino shapes (7 classic pieces)
         private static readonly int[][,] SHAPES = new int[][,]
@@ -43,13 +47,13 @@ namespace SnakeGame.Games
 
         private static readonly Color[] PIECE_COLORS = new Color[]
         {
-            Color. Cyan,     // I
+            Color.Cyan,     // I
             Color.Yellow,   // O
-            Color. Purple,   // T
-            Color. Green,    // S
+            Color.Purple,   // T
+            Color.Green,    // S
             Color.Red,      // Z
             Color.Blue,     // J
-            Color.Orange    // L
+            Color. Orange    // L
         };
 
         private class Tetromino
@@ -85,8 +89,13 @@ namespace SnakeGame.Games
         public void Initialize(IPixel[,] pixels)
         {
             score = 0;
+            level = 0;
             board = new int[20, 10];
             gameOver = false;
+            frameCounter = 0;
+            manualDropCooldown = 0;
+            rotateCooldown = 0;
+            gameOverCode = null;  // Reset code
             SpawnNewPiece();
         }
 
@@ -137,6 +146,18 @@ namespace SnakeGame.Games
 
             frameCounter++;
 
+            // Decrease manual drop cooldown
+            if (manualDropCooldown > 0)
+            {
+                manualDropCooldown--;
+            }
+
+            // Decrease rotate cooldown
+            if (rotateCooldown > 0)
+            {
+                rotateCooldown--;
+            }
+
             // Auto-drop piece
             if (frameCounter >= dropSpeed)
             {
@@ -152,6 +173,7 @@ namespace SnakeGame.Games
                     if (!IsValidPosition(pieceX, pieceY))
                     {
                         gameOver = true;
+                        gameOverCode = CodeGenerator.GenerateSixDigitCode();  // Generate code
                     }
                 }
             }
@@ -161,38 +183,70 @@ namespace SnakeGame.Games
 
         public void HandleInput(ConsoleKey key, ref bool stateChanged)
         {
-            if (gameOver) return;
+            if (gameOver)
+            {
+                // Allow escape to return to title
+                if (key == ConsoleKey.Escape)
+                {
+                    stateChanged = true;
+                }
+                return;
+            }
 
             switch (key)
             {
-                case ConsoleKey.A:  // Move left
+                case ConsoleKey.A:   // Move left
                 case ConsoleKey.LeftArrow:
                     MovePiece(-1, 0);
                     break;
-                case ConsoleKey.D: // Move right
+                case ConsoleKey.D:   // Move right
                 case ConsoleKey.RightArrow:
                     MovePiece(1, 0);
                     break;
-                case ConsoleKey.S: // Move down faster
+                case ConsoleKey.S:   // Move down faster (soft drop)
                 case ConsoleKey.DownArrow:
-                    if (!MovePiece(0, 1))
+                    // Only allow manual drop if cooldown expired
+                    if (manualDropCooldown <= 0)
                     {
-                        LockPiece();
-                        ClearLines();
-                        SpawnNewPiece();
-                        if (!IsValidPosition(pieceX, pieceY))
+                        if (MovePiece(0, 1))
                         {
-                            gameOver = true;
+                            // Soft drop bonus:   1 point per cell dropped
+                            score += 1;
                         }
+                        else
+                        {
+                            LockPiece();
+                            ClearLines();
+                            SpawnNewPiece();
+                            if (!IsValidPosition(pieceX, pieceY))
+                            {
+                                gameOver = true;
+                                gameOverCode = CodeGenerator.GenerateSixDigitCode();  // Generate code
+                            }
+                        }
+                        manualDropCooldown = 1;
                     }
                     break;
-                case ConsoleKey.W: // Rotate
+                case ConsoleKey.W:  // Rotate
                 case ConsoleKey.UpArrow:
                 case ConsoleKey.Spacebar:
-                    RotatePiece();
+                    // Only allow rotation if cooldown expired
+                    if (rotateCooldown <= 0)
+                    {
+                        RotatePiece();
+                        rotateCooldown = 5;  // Prevent rotation for 3 frames (~300ms)
+                    }
+                    break;
+                case ConsoleKey.Escape:
+                    // Signal Program that user requested to leave the playing state
+                    stateChanged = true;
                     break;
             }
         }
+
+        public bool IsGameOver() => gameOver;
+
+        public string GetGameOverCode() => gameOverCode;  // Return the generated code
 
         public int GetScore() => score;
 
@@ -201,7 +255,24 @@ namespace SnakeGame.Games
             currentPiece = new Tetromino(rand.Next(SHAPES.Length));
             pieceX = 5 - currentPiece.Shape.GetLength(1) / 2;
             pieceY = 0;
+            frameCounter = 0;
+
+            // Clear console input buffer to prevent buffered keys from affecting new piece.
+            // In CI/headless test runs, Console.KeyAvailable can throw InvalidOperationException,
+            // so guard it and simply skip clearing when no console is available.
+            try
+            {
+                while (Console.KeyAvailable)
+                {
+                    Console.ReadKey(true);
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                // No interactive console (e.g., CI runner / redirected input). Safe to ignore.
+            }
         }
+
 
         private bool MovePiece(int dx, int dy)
         {
@@ -328,10 +399,18 @@ namespace SnakeGame.Games
                 }
             }
 
-            // Score:  100 per line, bonus for multiple lines
+            // Classic Tetris scoring (NES style)
             if (linesCleared > 0)
             {
-                score += linesCleared * 100 * linesCleared;
+                int points = linesCleared switch
+                {
+                    1 => 40,      // Single
+                    2 => 100,     // Double
+                    3 => 300,     // Triple
+                    4 => 1200,    // Tetris!   
+                    _ => 0
+                };
+                score += points * (level + 1);
             }
         }
 

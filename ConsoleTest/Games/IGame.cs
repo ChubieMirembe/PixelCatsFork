@@ -1,7 +1,7 @@
 using PixelBoard;
 using System;
 
-namespace SnakeGame.Games
+namespace ConsoleTest.Games
 {
     public interface IGame
     {
@@ -10,5 +10,7 @@ namespace SnakeGame.Games
         void DrawTitle(IPixel[,] pixels);
         void HandleInput(ConsoleKey key, ref bool stateChanged);
         int GetScore();
+        bool IsGameOver();
+        string GetGameOverCode();
     }
 }
