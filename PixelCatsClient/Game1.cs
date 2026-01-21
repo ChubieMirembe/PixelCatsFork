@@ -43,7 +43,7 @@ namespace PixelCatsClient
         protected override void LoadContent()
         {
             _spriteBatch = new SpriteBatch(GraphicsDevice);
-            _font = Content.Load<SpriteFont>("DefaultFont");
+            _font = Content.Load<SpriteFont>("Content/DefaultFont");
 
             _white = new Texture2D(GraphicsDevice, 1, 1);
             _white.SetData(new[] { Color.White });
