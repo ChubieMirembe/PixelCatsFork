@@ -17,13 +17,14 @@ namespace PixelCatsClient
         private SpriteFont? _font;
         private Texture2D? _white;
         private Texture2D? _pixelCats;
+        private Texture2D? _bgGradient; 
         private ScoreWatcher? _watcher;
         private readonly ConcurrentQueue<Action> _mainThreadQueue = new();
         private System.Collections.Generic.Dictionary<string, ScoreRecord[]> _topScoresByGame = new(System.StringComparer.OrdinalIgnoreCase);
         private ScoreRecord[] _topScores = Array.Empty<ScoreRecord>();
         private string _statusLine = "Starting...";
 
-        private Color _bg = new Color(100, 20, 50);
+        private Color _bg = new Color(73, 17, 175);
 
         public Game1()
         {
@@ -46,7 +47,7 @@ namespace PixelCatsClient
             _font = Content.Load<SpriteFont>("Content/DefaultFont");
 
             _white = new Texture2D(GraphicsDevice, 1, 1);
-            _white.SetData(new[] { Color.White });
+            _white.SetData(new[] { Color.Orange });
 
             _pixelCats = Content.Load<Texture2D>("Content/PixelCats");
             string watcherPath;
@@ -59,7 +60,12 @@ namespace PixelCatsClient
                 watcherPath = "latest_score.json";
             }
 
-            //Console.WriteLine($"[Game1] Starting ScoreWatcher for: {watcherPath} (exists: {File.Exists(watcherPath)})");
+
+            var topColor = Color.Plum;
+            var bottomColor = Color.DarkSlateBlue;
+            int vpWidth = GraphicsDevice.Viewport.Width;
+            int vpHeight = Math.Max(2, GraphicsDevice.Viewport.Height);
+            _bgGradient = CreateVerticalGradientTexture(GraphicsDevice, vpWidth, vpHeight, topColor, bottomColor);
 
             _watcher = new ScoreWatcher(watcherPath);
             _watcher.NewScoreDetected += OnNewScoreDetected;
@@ -73,6 +79,7 @@ namespace PixelCatsClient
         {
             _watcher?.Stop();
             _white?.Dispose();
+            _bgGradient?.Dispose();
             base.UnloadContent();
         }
 
@@ -124,7 +131,17 @@ namespace PixelCatsClient
             if (_spriteBatch == null || _font == null || _white == null)
                 return;
 
-            GraphicsDevice.Clear(_bg);
+            // Draw gradient background if available, otherwise fallback to solid clear
+            if (_bgGradient != null)
+            {
+                _spriteBatch.Begin();
+                _spriteBatch.Draw(_bgGradient, new Rectangle(0, 0, GraphicsDevice.Viewport.Width, GraphicsDevice.Viewport.Height), Color.White);
+                _spriteBatch.End();
+            }
+            else
+            {
+                GraphicsDevice.Clear(_bg);
+            }
 
             _spriteBatch.Begin();
 
@@ -230,6 +247,24 @@ namespace PixelCatsClient
 
             var final = text.Substring(0, Math.Max(0, low)) + ellipsis;
             return final;
+        }
+
+        private Texture2D CreateVerticalGradientTexture(GraphicsDevice graphicsDevice, int width, int height, Color topColor, Color bottomColor)
+        {
+            // Create a 1xheight texture and set per-row colors, then stretch when drawing
+            var tex = new Texture2D(graphicsDevice, 1, height);
+            var data = new Color[height];
+            for (int y = 0; y < height; y++)
+            {
+                float t = height <= 1 ? 0f : (float)y / (height - 1);
+                byte r = (byte)(topColor.R + (bottomColor.R - topColor.R) * t);
+                byte g = (byte)(topColor.G + (bottomColor.G - topColor.G) * t);
+                byte b = (byte)(topColor.B + (bottomColor.B - topColor.B) * t);
+                byte a = (byte)(topColor.A + (bottomColor.A - topColor.A) * t);
+                data[y] = new Color(r, g, b, a);
+            }
+            tex.SetData(data);
+            return tex;
         }
 
         private async Task RefreshTopScoresAsync()
