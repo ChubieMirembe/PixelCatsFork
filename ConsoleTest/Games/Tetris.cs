@@ -1,6 +1,8 @@
 ﻿using PixelBoard;
 using System;
 using System.Drawing;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace ConsoleTest.Games
 {
@@ -19,6 +21,10 @@ namespace ConsoleTest.Games
         private int manualDropCooldown = 0;
         private int rotateCooldown = 0;  // Rotation cooldown
         private string gameOverCode = null;  // Game over code
+
+        // Async code-request support (mirror of Snake pattern)
+        private bool codeRequested = false;
+        private TaskCompletionSource<string?>? codeTcs;
 
         // Tetromino shapes (7 classic pieces)
         private static readonly int[][,] SHAPES = new int[][,]
@@ -96,6 +102,8 @@ namespace ConsoleTest.Games
             manualDropCooldown = 0;
             rotateCooldown = 0;
             gameOverCode = null;  // Reset code
+            codeRequested = false;
+            codeTcs = null;
             SpawnNewPiece();
         }
 
@@ -173,7 +181,8 @@ namespace ConsoleTest.Games
                     if (!IsValidPosition(pieceX, pieceY))
                     {
                         gameOver = true;
-                        gameOverCode = CodeGenerator.GenerateSixDigitCode();  // Generate code
+                        // start async request for server-generated code
+                        StartGameOverCodeRequest();
                     }
                 }
             }
@@ -221,7 +230,8 @@ namespace ConsoleTest.Games
                             if (!IsValidPosition(pieceX, pieceY))
                             {
                                 gameOver = true;
-                                gameOverCode = CodeGenerator.GenerateSixDigitCode();  // Generate code
+                                // start async request for server-generated code
+                                StartGameOverCodeRequest();
                             }
                         }
                         manualDropCooldown = 1;
@@ -471,6 +481,43 @@ namespace ConsoleTest.Games
                     pixels[row, col] = new Pixel(50, 0, 0);
                 }
             }
+        }
+
+        private void StartGameOverCodeRequest()
+        {
+            if (codeRequested) return;
+            codeRequested = true;
+            codeTcs ??= new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _ = RequestGameOverCodeAsync();
+        }
+
+        private async Task RequestGameOverCodeAsync()
+        {
+            try
+            {
+                var code = await ConsoleTest.CodeGenerator.GenerateSixDigitCodeAsync(allowFallback: true, timeoutSeconds: 3).ConfigureAwait(false);
+                gameOverCode = code;
+                codeTcs?.TrySetResult(code);
+            }
+            catch
+            {
+                codeTcs?.TrySetResult(gameOverCode);
+            }
+        }
+
+        /// <summary>
+        /// Awaitable helper that waits up to <paramref name="timeoutMs"/> for the server-provided code.
+        /// </summary>
+        public async Task<string?> WaitForGameOverCodeAsync(int timeoutMs = 3000)
+        {
+            if (!string.IsNullOrEmpty(gameOverCode)) return gameOverCode;
+            codeTcs ??= new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var completed = await Task.WhenAny(codeTcs.Task, Task.Delay(timeoutMs)).ConfigureAwait(false);
+            if (completed == codeTcs.Task)
+                return await codeTcs.Task.ConfigureAwait(false);
+
+            return gameOverCode;
         }
     }
 }

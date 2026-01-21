@@ -158,9 +158,46 @@ namespace SnakeGame
 
                 if (state == State.GameOver)
                 {
+                    // keep updating/drawing while waiting for an async code to arrive
                     gameLocal.Update(pixels);
 
+                    // Immediately read whatever code is currently available
                     lastGameOverCode = gameLocal.GetGameOverCode();
+
+                    // If the current game type exposes a waitable method (Snake implements WaitForGameOverCodeAsync),
+                    // block briefly here (up to timeout) to let the server-provided code arrive before writing the file.
+                    if (string.IsNullOrEmpty(lastGameOverCode))
+                    {
+                        const int timeoutMs = 3000;
+
+                        if (gameLocal is ConsoleTest.Games.Snake snakeImpl)
+                        {
+                            try
+                            {
+                                // Block synchronously up to timeout while the Snake instance supplies the code.
+                                // Using GetAwaiter().GetResult() avoids changing Main to async.
+                                var code = snakeImpl.WaitForGameOverCodeAsync(timeoutMs).GetAwaiter().GetResult();
+                                lastGameOverCode = string.IsNullOrEmpty(code) ? lastGameOverCode : code;
+                            }
+                            catch
+                            {
+                                // swallow; fall back to whatever value we have
+                            }
+                        }
+                        else
+                        {
+                            // Fallback: short polling loop for other games that don't expose a waiter.
+                            const int pollMs = 100;
+                            int waited = 0;
+                            while (string.IsNullOrEmpty(lastGameOverCode) && waited < timeoutMs)
+                            {
+                                Thread.Sleep(pollMs);
+                                waited += pollMs;
+                                gameLocal.Update(pixels);
+                                lastGameOverCode = gameLocal.GetGameOverCode();
+                            }
+                        }
+                    }
 
                     try
                     {

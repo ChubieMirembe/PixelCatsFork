@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace ConsoleTest.Games
 {
@@ -26,6 +27,13 @@ namespace ConsoleTest.Games
         private int moveCounter = 0;
         private string gameOverCode = null;
 
+        // Prevent multiple concurrent code requests
+        private bool codeRequested = false;
+
+        // TaskCompletionSource used to signal when a server-generated code arrives.
+        // This allows synchronous callers to wait for the code without changing Update() to async.
+        private TaskCompletionSource<string?>? codeTcs;
+
         public void Initialize(IPixel[,] pixels)
         {
             // Reset to original values
@@ -42,6 +50,8 @@ namespace ConsoleTest.Games
             gameOver = false;
             moveCounter = 0;
             gameOverCode = null;  // Reset code
+            codeRequested = false;
+            codeTcs = null;
 
             // Initialize snake body
             for (int i = 0; i < snakeLength; i++)
@@ -120,7 +130,7 @@ namespace ConsoleTest.Games
                 if (headX < 0 || headX >= 20 || headY < 0 || headY >= 10)
                 {
                     gameOver = true;
-                    gameOverCode = CodeGenerator.GenerateSixDigitCode();  // Generate code
+                    StartGameOverCodeRequest();
                     DrawGameOver(pixels);
                     return;
                 }
@@ -138,7 +148,7 @@ namespace ConsoleTest.Games
             if (snake.Contains((headX, headY)))
             {
                 gameOver = true;
-                gameOverCode = CodeGenerator.GenerateSixDigitCode();  // Generate code
+                StartGameOverCodeRequest();
                 DrawGameOver(pixels);
                 return;
             }
@@ -163,6 +173,33 @@ namespace ConsoleTest.Games
 
             // Draw game
             DrawGame(pixels);
+        }
+
+        private void StartGameOverCodeRequest()
+        {
+            if (codeRequested) return;
+            codeRequested = true;
+            // Prepare TCS so other code can wait for the server response
+            codeTcs ??= new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            // Fire-and-forget; request the code in background
+            _ = RequestGameOverCodeAsync();
+        }
+
+        private async Task RequestGameOverCodeAsync()
+        {
+            try
+            {
+                // allowFallback=true keeps behavior if server unreachable.
+                // Pass allowFallback:false if you want to require server-generated code.
+                var code = await ConsoleTest.CodeGenerator.GenerateSixDigitCodeAsync(allowFallback: true, timeoutSeconds: 3).ConfigureAwait(false);
+                gameOverCode = code;
+                codeTcs?.TrySetResult(code);
+            }
+            catch
+            {
+                // Swallow exceptions; set TCS so waiters won't hang.
+                codeTcs?.TrySetResult(gameOverCode);
+            }
         }
 
         public void HandleInput(ConsoleKey key, ref bool stateChanged)
@@ -227,6 +264,24 @@ namespace ConsoleTest.Games
         public string GetGameOverCode() => gameOverCode;  // Return the generated code
 
         public int GetScore() => score;
+
+        /// <summary>
+        /// Awaitable helper that waits up to <paramref name="timeoutMs"/> for the server-provided code.
+        /// Returns the code if available, otherwise returns whatever value is currently in <see cref="gameOverCode"/> (may be null).
+        /// Callers may block on the returned Task if they can't be async.
+        /// </summary>
+        public async Task<string?> WaitForGameOverCodeAsync(int timeoutMs = 3000)
+        {
+            if (!string.IsNullOrEmpty(gameOverCode)) return gameOverCode;
+            codeTcs ??= new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var completed = await Task.WhenAny(codeTcs.Task, Task.Delay(timeoutMs)).ConfigureAwait(false);
+            if (completed == codeTcs.Task)
+                return await codeTcs.Task.ConfigureAwait(false);
+
+            // timeout -> return current value (may be null or fallback code)
+            return gameOverCode;
+        }
 
         private int GetMoveSpeed()
         {

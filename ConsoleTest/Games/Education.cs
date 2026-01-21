@@ -1,5 +1,7 @@
 using PixelBoard;
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace ConsoleTest.Games
 {
@@ -24,6 +26,10 @@ namespace ConsoleTest.Games
         private bool gameOver = false;
         private string gameOverCode = null;
 
+        // Async code-request support (mirror of Snake pattern)
+        private bool codeRequested = false;
+        private TaskCompletionSource<string?>? codeTcs;
+
         public void Initialize(IPixel[,] pixels)
         {
             score = 0;
@@ -34,6 +40,8 @@ namespace ConsoleTest.Games
             spawnCounter = 0;
             gameOver = false;
             gameOverCode = null;
+            codeRequested = false;
+            codeTcs = null;
         }
 
         public void DrawTitle(IPixel[,] pixels)
@@ -122,14 +130,8 @@ namespace ConsoleTest.Games
                                     if (lives <= 0)
                                     {
                                         gameOver = true;
-                                        try
-                                        {
-                                            gameOverCode = CodeGenerator.GenerateSixDigitCode();
-                                        }
-                                        catch
-                                        {
-                                            gameOverCode = null;
-                                        }
+                                        // start async request for server-generated code
+                                        StartGameOverCodeRequest();
                                     }
                                 }
                                 board[r, c] = 0; // remove source cell (block consumed / removed)
@@ -171,14 +173,8 @@ namespace ConsoleTest.Games
                                 if (lives <= 0)
                                 {
                                     gameOver = true;
-                                    try
-                                    {
-                                        gameOverCode = CodeGenerator.GenerateSixDigitCode();
-                                    }
-                                    catch
-                                    {
-                                        gameOverCode = null;
-                                    }
+                                    // start async request for server-generated code
+                                    StartGameOverCodeRequest();
                                 }
                             }
                             board[rows - 1, c] = 0;
@@ -316,6 +312,45 @@ namespace ConsoleTest.Games
             int decreased = score / speedupScoreStep;
             int interval = dropIntervalBase - decreased;
             return Math.Max(minDropInterval, interval);
+        }
+
+        private void StartGameOverCodeRequest()
+        {
+            if (codeRequested) return;
+            codeRequested = true;
+            codeTcs ??= new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _ = RequestGameOverCodeAsync();
+        }
+
+        private async Task RequestGameOverCodeAsync()
+        {
+            try
+            {
+                var code = await ConsoleTest.CodeGenerator.GenerateSixDigitCodeAsync(allowFallback: true, timeoutSeconds: 3).ConfigureAwait(false);
+                gameOverCode = code;
+                codeTcs?.TrySetResult(code);
+            }
+            catch
+            {
+                // ensure waiters are signaled even on failure
+                codeTcs?.TrySetResult(gameOverCode);
+            }
+        }
+
+        /// <summary>
+        /// Awaitable helper that waits up to <paramref name="timeoutMs"/> for the server-provided code.
+        /// Returns the code if available, otherwise returns whatever value is currently in <see cref="gameOverCode"/>.
+        /// </summary>
+        public async Task<string?> WaitForGameOverCodeAsync(int timeoutMs = 3000)
+        {
+            if (!string.IsNullOrEmpty(gameOverCode)) return gameOverCode;
+            codeTcs ??= new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var completed = await Task.WhenAny(codeTcs.Task, Task.Delay(timeoutMs)).ConfigureAwait(false);
+            if (completed == codeTcs.Task)
+                return await codeTcs.Task.ConfigureAwait(false);
+
+            return gameOverCode;
         }
     }
 }

@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace PixelCatsClient
@@ -16,6 +18,28 @@ namespace PixelCatsClient
             var apiKey = Environment.GetEnvironmentVariable("API_KEY");
             if (!string.IsNullOrEmpty(apiKey))
                 _http.DefaultRequestHeaders.Add("x-api-key", apiKey);
+        }
+
+        private sealed record CodeResponse(string code);
+
+        /// <summary>
+        /// Calls GET /api/generate_code and returns the server-generated code or null on failure.
+        /// </summary>
+        public static async Task<string?> GetGeneratedCodeAsync(CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                using var resp = await _http.GetAsync("/api/generate_code", cancellationToken).ConfigureAwait(false);
+                if (!resp.IsSuccessStatusCode) return null;
+
+                var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                var payload = await resp.Content.ReadFromJsonAsync<CodeResponse>(opts, cancellationToken).ConfigureAwait(false);
+                return payload?.code;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         public static async Task<bool> SubmitCodeAsync(string code, int score, string gameName)

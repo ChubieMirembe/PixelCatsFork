@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\PixelBoardDisplay\PixelBoard.csproj" />
+    <ProjectReference Include="..\PixelCatsClient\PixelCatsClient.csproj" />
   </ItemGroup>
 
   <ItemGroup>
