@@ -72,7 +72,7 @@ namespace PixelCatsClient
             _watcher.Start();
 
             _ = RefreshTopScoresAsync();
-            _statusLine = "Listening for scores...";
+            //_statusLine = "Listening for scores...";
         }
 
         protected override void UnloadContent()
@@ -217,7 +217,7 @@ namespace PixelCatsClient
             _spriteBatch.DrawString(_font, _statusLine, new Vector2(padding + 8, GraphicsDevice.Viewport.Height - 60), Color.LightGray);
 
             // Footer
-            var footer = "Press Esc to exit. Listening for changes to latest_score.json";
+            var footer = "Press Esc to exit.";
             var footerSize = _font.MeasureString(footer);
             _spriteBatch.DrawString(_font, footer, new Vector2(padding, GraphicsDevice.Viewport.Height - 30), Color.Gray);
 
