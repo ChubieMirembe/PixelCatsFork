@@ -9,6 +9,9 @@ namespace ConsoleTest.Games
 {
     public class Snake : IGame
     {
+        // Unique identifier for this game. Replace with the real ID provided by the site.
+        public string GameId { get; } = "zGBgI23i6LI";
+
         // Game variables
         private Queue<(int x, int y)> snake = new Queue<(int x, int y)>();
         private int snakeLength = 5;
@@ -27,11 +30,6 @@ namespace ConsoleTest.Games
         private int moveCounter = 0;
         private string gameOverCode = null;
 
-        // Prevent multiple concurrent code requests
-        private bool codeRequested = false;
-
-        // TaskCompletionSource used to signal when a server-generated code arrives.
-        // This allows synchronous callers to wait for the code without changing Update() to async.
         private TaskCompletionSource<string?>? codeTcs;
 
         public void Initialize(IPixel[,] pixels)
@@ -50,7 +48,6 @@ namespace ConsoleTest.Games
             gameOver = false;
             moveCounter = 0;
             gameOverCode = null;  // Reset code
-            codeRequested = false;
             codeTcs = null;
 
             // Initialize snake body
@@ -130,7 +127,6 @@ namespace ConsoleTest.Games
                 if (headX < 0 || headX >= 20 || headY < 0 || headY >= 10)
                 {
                     gameOver = true;
-                    StartGameOverCodeRequest();
                     DrawGameOver(pixels);
                     return;
                 }
@@ -148,7 +144,6 @@ namespace ConsoleTest.Games
             if (snake.Contains((headX, headY)))
             {
                 gameOver = true;
-                StartGameOverCodeRequest();
                 DrawGameOver(pixels);
                 return;
             }
@@ -173,33 +168,6 @@ namespace ConsoleTest.Games
 
             // Draw game
             DrawGame(pixels);
-        }
-
-        private void StartGameOverCodeRequest()
-        {
-            if (codeRequested) return;
-            codeRequested = true;
-            // Prepare TCS so other code can wait for the server response
-            codeTcs ??= new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
-            // Fire-and-forget; request the code in background
-            _ = RequestGameOverCodeAsync();
-        }
-
-        private async Task RequestGameOverCodeAsync()
-        {
-            try
-            {
-                // allowFallback=true keeps behavior if server unreachable.
-                // Pass allowFallback:false if you want to require server-generated code.
-                var code = await ConsoleTest.CodeGenerator.GenerateSixDigitCodeAsync(allowFallback: true, timeoutSeconds: 3).ConfigureAwait(false);
-                gameOverCode = code;
-                codeTcs?.TrySetResult(code);
-            }
-            catch
-            {
-                // Swallow exceptions; set TCS so waiters won't hang.
-                codeTcs?.TrySetResult(gameOverCode);
-            }
         }
 
         public void HandleInput(ConsoleKey key, ref bool stateChanged)
@@ -261,9 +229,15 @@ namespace ConsoleTest.Games
         // Expose game-over status so Program can reliably transition to GameOver and export final score. 
         public bool IsGameOver() => gameOver;
 
-        public string GetGameOverCode() => gameOverCode;  // Return the generated code
+        public string GetGameOverCode() => gameOverCode;  // Return the generated code (may be null)
 
         public int GetScore() => score;
+
+        public void SetGameOverCode(string? code)
+        {
+            gameOverCode = code;
+            codeTcs?.TrySetResult(code);
+        }
 
         /// <summary>
         /// Awaitable helper that waits up to <paramref name="timeoutMs"/> for the server-provided code.

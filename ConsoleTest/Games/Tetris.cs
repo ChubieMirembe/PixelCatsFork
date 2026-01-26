@@ -1,13 +1,15 @@
 ﻿using PixelBoard;
 using System;
 using System.Drawing;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace ConsoleTest.Games
 {
     public class Tetris : IGame
     {
+        // Unique identifier for this game. Replace with the real ID provided by the site.
+        public string GameId { get; } = "TETRIS_GAME_ID";
+
         private int score = 0;
         private int level = 0;  // Level for authentic scoring
         private int[,] board = new int[20, 10]; // 0 = empty, 1+ = filled
@@ -22,8 +24,6 @@ namespace ConsoleTest.Games
         private int rotateCooldown = 0;  // Rotation cooldown
         private string gameOverCode = null;  // Game over code
 
-        // Async code-request support (mirror of Snake pattern)
-        private bool codeRequested = false;
         private TaskCompletionSource<string?>? codeTcs;
 
         // Tetromino shapes (7 classic pieces)
@@ -59,7 +59,7 @@ namespace ConsoleTest.Games
             Color.Green,    // S
             Color.Red,      // Z
             Color.Blue,     // J
-            Color. Orange    // L
+            Color.Orange    // L
         };
 
         private class Tetromino
@@ -102,7 +102,6 @@ namespace ConsoleTest.Games
             manualDropCooldown = 0;
             rotateCooldown = 0;
             gameOverCode = null;  // Reset code
-            codeRequested = false;
             codeTcs = null;
             SpawnNewPiece();
         }
@@ -181,8 +180,6 @@ namespace ConsoleTest.Games
                     if (!IsValidPosition(pieceX, pieceY))
                     {
                         gameOver = true;
-                        // start async request for server-generated code
-                        StartGameOverCodeRequest();
                     }
                 }
             }
@@ -230,8 +227,6 @@ namespace ConsoleTest.Games
                             if (!IsValidPosition(pieceX, pieceY))
                             {
                                 gameOver = true;
-                                // start async request for server-generated code
-                                StartGameOverCodeRequest();
                             }
                         }
                         manualDropCooldown = 1;
@@ -256,7 +251,13 @@ namespace ConsoleTest.Games
 
         public bool IsGameOver() => gameOver;
 
-        public string GetGameOverCode() => gameOverCode;  // Return the generated code
+        public string GetGameOverCode() => gameOverCode;  // Return the generated code (may be null)
+
+        public void SetGameOverCode(string? code)
+        {
+            gameOverCode = code;
+            codeTcs?.TrySetResult(code);
+        }
 
         public int GetScore() => score;
 
@@ -480,28 +481,6 @@ namespace ConsoleTest.Games
                 {
                     pixels[row, col] = new Pixel(50, 0, 0);
                 }
-            }
-        }
-
-        private void StartGameOverCodeRequest()
-        {
-            if (codeRequested) return;
-            codeRequested = true;
-            codeTcs ??= new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _ = RequestGameOverCodeAsync();
-        }
-
-        private async Task RequestGameOverCodeAsync()
-        {
-            try
-            {
-                var code = await ConsoleTest.CodeGenerator.GenerateSixDigitCodeAsync(allowFallback: true, timeoutSeconds: 3).ConfigureAwait(false);
-                gameOverCode = code;
-                codeTcs?.TrySetResult(code);
-            }
-            catch
-            {
-                codeTcs?.TrySetResult(gameOverCode);
             }
         }
 

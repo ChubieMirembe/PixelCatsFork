@@ -81,8 +81,8 @@ namespace SnakeGame
                 int initialScore;
                 try { initialScore = gameLocal.GetScore(); } catch { initialScore = 0; }
 
-                // Fix CS8625 at call-site by using nullable parameters in signature (see method below)
-                WriteScoreFileAtomic(scoreFilePath, initialScore, gameLocal, state: "Startup", code: null);
+                // Write initial file (no code - server will generate and store it)
+                WriteScoreFileAtomic(scoreFilePath, initialScore, gameLocal, state: "Startup");
 
                 lastExportedScore = initialScore;
                 Console.WriteLine($"[ConsoleTest] Initialized score file '{scoreFilePath}' with score {initialScore}");
@@ -158,57 +158,47 @@ namespace SnakeGame
 
                 if (state == State.GameOver)
                 {
-                    // keep updating/drawing while waiting for an async code to arrive
+                    // keep updating/drawing while in GameOver visual state
                     gameLocal.Update(pixels);
 
-                    // Immediately read whatever code is currently available
-                    lastGameOverCode = gameLocal.GetGameOverCode();
-
-                    // If the current game type exposes a waitable method (Snake implements WaitForGameOverCodeAsync),
-                    // block briefly here (up to timeout) to let the server-provided code arrive before writing the file.
-                    if (string.IsNullOrEmpty(lastGameOverCode))
-                    {
-                        const int timeoutMs = 3000;
-
-                        if (gameLocal is ConsoleTest.Games.Snake snakeImpl)
-                        {
-                            try
-                            {
-                                // Block synchronously up to timeout while the Snake instance supplies the code.
-                                // Using GetAwaiter().GetResult() avoids changing Main to async.
-                                var code = snakeImpl.WaitForGameOverCodeAsync(timeoutMs).GetAwaiter().GetResult();
-                                lastGameOverCode = string.IsNullOrEmpty(code) ? lastGameOverCode : code;
-                            }
-                            catch
-                            {
-                                // swallow; fall back to whatever value we have
-                            }
-                        }
-                        else
-                        {
-                            // Fallback: short polling loop for other games that don't expose a waiter.
-                            const int pollMs = 100;
-                            int waited = 0;
-                            while (string.IsNullOrEmpty(lastGameOverCode) && waited < timeoutMs)
-                            {
-                                Thread.Sleep(pollMs);
-                                waited += pollMs;
-                                gameLocal.Update(pixels);
-                                lastGameOverCode = gameLocal.GetGameOverCode();
-                            }
-                        }
-                    }
-
+                    // Write final score first to avoid race with server-side generation.
+                    // Do NOT attempt to rely on an in-game code being already present.
+                    int finalScore = gameLocal.GetScore();
                     try
                     {
-                        int finalScore = gameLocal.GetScore();
-                        WriteScoreFileAtomic(scoreFilePath, finalScore, gameLocal, state: "GameOver", code: lastGameOverCode);
+                        // Write score file without code (server will generate code after receiving score)
+                        WriteScoreFileAtomic(scoreFilePath, finalScore, gameLocal, state: "GameOver");
                         lastExportedScore = finalScore;
-                        Console.WriteLine($"[ConsoleTest] Final score exported: {finalScore}, Code: {lastGameOverCode} -> {scoreFilePath}");
+                        Console.WriteLine($"[ConsoleTest] Final score exported: {finalScore} -> {scoreFilePath}");
                     }
                     catch (Exception ex)
                     {
                         Console.WriteLine($"[ConsoleTest] Failed to write final score to '{scoreFilePath}': {ex.GetType().Name}: {ex.Message}");
+                    }
+
+                    // Now request the server to store the score and return the six-digit code.
+                    try
+                    {
+                        // Block synchronously up to CodeGenerator's timeout so the code is available for display immediately.
+                        // This ensures the file has been written before we call the server.
+                        var code = ConsoleTest.CodeGenerator.GenerateSixDigitCodeAsync(finalScore, gameLocal.GameId, allowFallback: true, timeoutSeconds: 3)
+                            .GetAwaiter().GetResult();
+
+                        if (!string.IsNullOrEmpty(code))
+                        {
+                            lastGameOverCode = code;
+                            // Give the game the retrieved code so it can display it.
+                            gameLocal.SetGameOverCode(lastGameOverCode);
+                            Console.WriteLine($"[ConsoleTest] Server generated code: {lastGameOverCode}");
+                        }
+                        else
+                        {
+                            Console.WriteLine("[ConsoleTest] Server did not return a code; using local fallback (if any).");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[ConsoleTest] Failed to obtain server-generated code: {ex.GetType().Name}: {ex.Message}");
                     }
 
                     Thread.Sleep(1000);
@@ -242,16 +232,14 @@ namespace SnakeGame
             }
         }
 
-        // Fix CS8625: allow null for optional params by making them nullable.
-        // Also avoids CS8604 by accepting IGame? and coalescing safely.
-        private static void WriteScoreFileAtomic(string path, int score, IGame? game, string? state = null, string? code = null)
+        // Write score file WITHOUT the code — server stores the code when it receives the score.
+        private static void WriteScoreFileAtomic(string path, int score, IGame? game, string? state = null)
         {
             var payload = new
             {
                 score,
                 state,
-                code,
-                gameName = game?.ToString() ?? string.Empty,
+                gameId = game?.GameId ?? string.Empty,
                 timestamp = DateTimeOffset.UtcNow.ToString("O")
             };
 

@@ -42,6 +42,28 @@ namespace PixelCatsClient
             }
         }
 
+        /// <summary>
+        /// Posts score and gameId to /api/codes and returns the server-generated code (or null on failure).
+        /// This matches the server behavior where it stores the score and game identifier and generates the code.
+        /// </summary>
+        public static async Task<string?> CreateScoreAndGetCodeAsync(int score, string gameId, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var payload = new { score, gameId };
+                using var resp = await _http.PostAsJsonAsync("/api/codes", payload, cancellationToken).ConfigureAwait(false);
+                if (!resp.IsSuccessStatusCode) return null;
+
+                var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                var cr = await resp.Content.ReadFromJsonAsync<CodeResponse>(opts, cancellationToken).ConfigureAwait(false);
+                return cr?.code;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         public static async Task<bool> SubmitCodeAsync(string code, int score, string gameName)
         {
             try
@@ -107,12 +129,14 @@ namespace PixelCatsClient
                     string created_at = el.TryGetProperty("created_at", out var caProp) && caProp.ValueKind == System.Text.Json.JsonValueKind.String
                         ? caProp.GetString()! : "";
 
-                    // Accept either "game" or "gameName"
+                    // Accept either "game" or "gameName" or "gameId"
                     string game = "";
                     if (el.TryGetProperty("game", out var gameProp) && gameProp.ValueKind == System.Text.Json.JsonValueKind.String)
                         game = gameProp.GetString()!;
                     else if (el.TryGetProperty("gameName", out var gnProp) && gnProp.ValueKind == System.Text.Json.JsonValueKind.String)
                         game = gnProp.GetString()!;
+                    else if (el.TryGetProperty("gameId", out var gidProp) && gidProp.ValueKind == System.Text.Json.JsonValueKind.String)
+                        game = gidProp.GetString()!;
 
                     // Construct ScoreRecord using your existing record signature (id, name, score, created_at, game)
                     list.Add(new ScoreRecord(id, name, score, created_at, game));

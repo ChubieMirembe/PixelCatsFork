@@ -16,16 +16,16 @@ namespace ConsoleTest
         }
 
         /// <summary>
-        /// Requests a unique six-digit code from the server. If the request fails and allowFallback is true,
-        /// the method returns a locally-generated code (same algorithm as the original GenerateSixDigitCode).
-        /// Returns the exact string received from the server when successful.
+        /// Requests a unique six-digit code from the server by posting the score and gameId so
+        /// the server can store the score and generate the code. If the request fails and allowFallback is true,
+        /// the method returns a locally-generated code. Returns the exact string received from the server when successful.
         /// </summary>
-        public static async Task<string> GenerateSixDigitCodeAsync(bool allowFallback = true, int timeoutSeconds = 3)
+        public static async Task<string> GenerateSixDigitCodeAsync(int score, string gameId, bool allowFallback = true, int timeoutSeconds = 3)
         {
             try
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
-                var code = await ApiClient.GetGeneratedCodeAsync(cts.Token).ConfigureAwait(false);
+                var code = await ApiClient.CreateScoreAndGetCodeAsync(score, gameId, cts.Token).ConfigureAwait(false);
                 if (!string.IsNullOrEmpty(code)) return code;
             }
             catch

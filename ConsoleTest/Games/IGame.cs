@@ -12,5 +12,7 @@ namespace ConsoleTest.Games
         int GetScore();
         bool IsGameOver();
         string GetGameOverCode();
+        void SetGameOverCode(string? code);
+        string GameId { get; }
     }
 }
