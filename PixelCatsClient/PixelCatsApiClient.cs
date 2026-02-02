@@ -18,11 +18,11 @@ namespace PixelCatsClient
             _http = http ?? throw new ArgumentNullException(nameof(http));
         }
 
-        // Fixes CS8625 by making apiKey nullable
-        public async Task<bool> SubmitCodeAsync(string code, int score, string gameName, string? apiKey = null)
+        // Submit a code to the server. `gameCode` is the developer-facing token (game_code) the server expects.
+        public async Task<bool> SubmitCodeAsync(string code, int score, string gameCode, string? apiKey = null)
         {
             if (string.IsNullOrEmpty(code)) throw new ArgumentException("code required", nameof(code));
-            if (string.IsNullOrEmpty(gameName)) throw new ArgumentException("gameName required", nameof(gameName));
+            if (string.IsNullOrEmpty(gameCode)) throw new ArgumentException("gameCode required", nameof(gameCode));
 
             if (!string.IsNullOrEmpty(apiKey))
             {
@@ -31,7 +31,8 @@ namespace PixelCatsClient
                 _http.DefaultRequestHeaders.Add("x-api-key", apiKey);
             }
 
-            var payload = new { code, score, gameName };
+            // Use the `game_code` key so the server recognizes the developer token
+            var payload = new { code, score, game_code = gameCode };
 
             try
             {

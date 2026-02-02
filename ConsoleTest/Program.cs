@@ -181,7 +181,7 @@ namespace SnakeGame
                     {
                         // Block synchronously up to CodeGenerator's timeout so the code is available for display immediately.
                         // This ensures the file has been written before we call the server.
-                        var code = ConsoleTest.CodeGenerator.GenerateSixDigitCodeAsync(finalScore, gameLocal.GameId, allowFallback: true, timeoutSeconds: 3)
+                        var code = ConsoleTest.CodeGenerator.GenerateSixDigitCodeAsync(finalScore, gameLocal.GameId ?? string.Empty, allowFallback: true, timeoutSeconds: 3)
                             .GetAwaiter().GetResult();
 
                         if (!string.IsNullOrEmpty(code))
@@ -190,6 +190,17 @@ namespace SnakeGame
                             // Give the game the retrieved code so it can display it.
                             gameLocal.SetGameOverCode(lastGameOverCode);
                             Console.WriteLine($"[ConsoleTest] Server generated code: {lastGameOverCode}");
+
+                            // Also write the score file again including the code so external consumers can pick it up.
+                            try
+                            {
+                                WriteScoreFileAtomic(scoreFilePath, finalScore, gameLocal, state: "GameOver", code: lastGameOverCode);
+                                Console.WriteLine($"[ConsoleTest] Updated score file with code: {lastGameOverCode}");
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[ConsoleTest] Failed to write score file with code to '{scoreFilePath}': {ex.GetType().Name}: {ex.Message}");
+                            }
                         }
                         else
                         {
@@ -233,15 +244,22 @@ namespace SnakeGame
         }
 
         // Write score file WITHOUT the code — server stores the code when it receives the score.
-        private static void WriteScoreFileAtomic(string path, int score, IGame? game, string? state = null)
+        // If 'code' is provided, include it in the JSON (written atomically).
+        private static void WriteScoreFileAtomic(string path, int score, IGame? game, string? state = null, string? code = null)
         {
-            var payload = new
+            // Use a dictionary so we only include the 'code' property when it is non-null.
+            var payload = new Dictionary<string, object?>
             {
-                score,
-                state,
-                gameId = game?.GameId ?? string.Empty,
-                timestamp = DateTimeOffset.UtcNow.ToString("O")
+                ["score"] = score,
+                ["state"] = state,
+                ["gameName"] = game?.ToString() ?? string.Empty,
+                ["timestamp"] = DateTimeOffset.UtcNow.ToString("O")
             };
+
+            if (!string.IsNullOrEmpty(code))
+            {
+                payload["code"] = code;
+            }
 
             var json = JsonSerializer.Serialize(payload);
 

@@ -10,7 +10,7 @@ namespace ConsoleTest.Games
     public class Snake : IGame
     {
         // Unique identifier for this game. Replace with the real ID provided by the site.
-        public string GameId { get; } = "zGBgI23i6LI";
+        public string GameId { get; } = "uw0iQfREtVw";
 
         // Game variables
         private Queue<(int x, int y)> snake = new Queue<(int x, int y)>();
