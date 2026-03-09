@@ -8,6 +8,7 @@ using System.Threading;
 using System.IO;
 using System.Text.Json;
 using ConsoleTest.Games;
+using System.Threading.Tasks;
 
 namespace SnakeGame
 {
@@ -28,11 +29,12 @@ namespace SnakeGame
         private static Dictionary<GameChoiceState, IGame>? games;
         private static IGame? currentGame;
 
-        private static void Main(string[] args)
+        private static async Task Main(string[] args)
         {
             // Fix filename typo: "appsettings. json" -> "appsettings.json"
             _config = new ConfigurationBuilder()
                 .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
+                .AddEnvironmentVariables()
                 .Build();
 
             bool useEmulator = true;
@@ -41,7 +43,14 @@ namespace SnakeGame
             {
                 _ = bool.TryParse(useEmulatorValue, out useEmulator);
             }
+            var baseUrl = _config["Leaderboard:BaseUrl"] ?? "http://127.0.0.1:3000";
+            var secret = _config["LEADERBOARD_DEVICE_HMAC_SECRET"];
+            if (string.IsNullOrWhiteSpace(secret))
+                throw new Exception("Missing env var LEADERBOARD_DEVICE_HMAC_SECRET");
+            // pick game_code based on current game selection
+           
 
+            var leaderboard = new ConsoleTest.LeaderboardClient(baseUrl, secret);
             IDisplay emulatorDisplay = new ConsoleDisplay();
             // IDisplay hardwareDisplay = new ArduinoDisplay(); // Uncomment when hardware display is available
 
@@ -115,6 +124,7 @@ namespace SnakeGame
                                 state = State.Playing;
                                 gameLocal.Initialize(pixels);
                                 lastGameOverCode = null;
+                                gameLocal.SetGameOverCode(null);
                                 break;
 
                             case ConsoleKey.A:
@@ -166,51 +176,55 @@ namespace SnakeGame
                     int finalScore = gameLocal.GetScore();
                     try
                     {
-                        // Write score file without code (server will generate code after receiving score)
-                        WriteScoreFileAtomic(scoreFilePath, finalScore, gameLocal, state: "GameOver");
-                        lastExportedScore = finalScore;
-                        Console.WriteLine($"[ConsoleTest] Final score exported: {finalScore} -> {scoreFilePath}");
+                        // Use per-game token from the game itself
+                        string claimCode = await leaderboard.MintClaimCodeAsync(gameLocal.GameId, finalScore);
+                        lastGameOverCode = claimCode;
+                        gameLocal.SetGameOverCode(claimCode);
+
+                        WriteScoreFileAtomic(scoreFilePath, finalScore, gameLocal, state: "GameOver", code: claimCode);
+
+                        Console.WriteLine($"[ConsoleTest] Final score: {finalScore}, server code: {claimCode}");
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[ConsoleTest] Failed to write final score to '{scoreFilePath}': {ex.GetType().Name}: {ex.Message}");
+                        Console.WriteLine($"[ConsoleTest] Failed to mint claim code: {ex.Message}");
                     }
 
-                    // Now request the server to store the score and return the six-digit code.
-                    try
-                    {
-                        // Block synchronously up to CodeGenerator's timeout so the code is available for display immediately.
-                        // This ensures the file has been written before we call the server.
-                        var code = ConsoleTest.CodeGenerator.GenerateSixDigitCodeAsync(finalScore, gameLocal.GameId ?? string.Empty, allowFallback: true, timeoutSeconds: 3)
-                            .GetAwaiter().GetResult();
+                    //// Now request the server to store the score and return the six-digit code.
+                    //try
+                    //{
+                    //    // Block synchronously up to CodeGenerator's timeout so the code is available for display immediately.
+                    //    // This ensures the file has been written before we call the server.
+                    //    var code = ConsoleTest.CodeGenerator.GenerateSixDigitCodeAsync(finalScore, gameLocal.GameId ?? string.Empty, allowFallback: true, timeoutSeconds: 3)
+                    //        .GetAwaiter().GetResult();
 
-                        if (!string.IsNullOrEmpty(code))
-                        {
-                            lastGameOverCode = code;
-                            // Give the game the retrieved code so it can display it.
-                            gameLocal.SetGameOverCode(lastGameOverCode);
-                            Console.WriteLine($"[ConsoleTest] Server generated code: {lastGameOverCode}");
+                    //    if (!string.IsNullOrEmpty(code))
+                    //    {
+                    //        lastGameOverCode = code;
+                    //        // Give the game the retrieved code so it can display it.
+                    //        gameLocal.SetGameOverCode(lastGameOverCode);
+                    //        Console.WriteLine($"[ConsoleTest] Server generated code: {lastGameOverCode}");
 
-                            // Also write the score file again including the code so external consumers can pick it up.
-                            try
-                            {
-                                WriteScoreFileAtomic(scoreFilePath, finalScore, gameLocal, state: "GameOver", code: lastGameOverCode);
-                                Console.WriteLine($"[ConsoleTest] Updated score file with code: {lastGameOverCode}");
-                            }
-                            catch (Exception ex)
-                            {
-                                Console.WriteLine($"[ConsoleTest] Failed to write score file with code to '{scoreFilePath}': {ex.GetType().Name}: {ex.Message}");
-                            }
-                        }
-                        else
-                        {
-                            Console.WriteLine("[ConsoleTest] Server did not return a code; using local fallback (if any).");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[ConsoleTest] Failed to obtain server-generated code: {ex.GetType().Name}: {ex.Message}");
-                    }
+                    //        // Also write the score file again including the code so external consumers can pick it up.
+                    //        try
+                    //        {
+                    //            WriteScoreFileAtomic(scoreFilePath, finalScore, gameLocal, state: "GameOver", code: lastGameOverCode);
+                    //            Console.WriteLine($"[ConsoleTest] Updated score file with code: {lastGameOverCode}");
+                    //        }
+                    //        catch (Exception ex)
+                    //        {
+                    //            Console.WriteLine($"[ConsoleTest] Failed to write score file with code to '{scoreFilePath}': {ex.GetType().Name}: {ex.Message}");
+                    //        }
+                    //    }
+                    //    else
+                    //    {
+                    //        Console.WriteLine("[ConsoleTest] Server did not return a code; using local fallback (if any).");
+                    //    }
+                    //}
+                    //catch (Exception ex)
+                    //{
+                    //    Console.WriteLine($"[ConsoleTest] Failed to obtain server-generated code: {ex.GetType().Name}: {ex.Message}");
+                    //}
 
                     Thread.Sleep(1000);
 
