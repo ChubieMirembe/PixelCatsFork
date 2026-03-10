@@ -1,64 +1,51 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO.Ports;
-using System.Text;
-//using System.IO.Ports;
-using System.Threading;
 using System.Timers;
 
 namespace PixelBoard
 {
     public class ArduinoDisplay : IDisplay
     {
-        private DisplayHelper dh = new DisplayHelper();
+        private readonly DisplayHelper dh = new DisplayHelper();
         private bool finishedStreaming = true;
-        private SerialPortManager SerialPortManager = new SerialPortManager();
+        private readonly SerialPortManager serialPortManager = new SerialPortManager();
 
-        private const string streamMode = "normal"; // options: normal, partial - this should be moved to config file
+        private const int OutputLedCount = 256;
+        private static readonly byte[] FrameMagic = new byte[] { (byte)'P', (byte)'B', (byte)'F', (byte)'R' };
 
         public ArduinoDisplay()
         {
-            // ensure size is set before we initialise the board or start the timer
-            this.dh.SetSize(20, 10);
+            // Leave this disabled until host display is confirmed working.
+            // new ArduinoInput(serialPortManager);
 
-            new ArduinoInput(SerialPortManager); // This line must be here to allow button presses
+            this.dh.SetSize(20, 10);
+            this.dh.SetFramerate(15);
+
             initBoard();
+
             ElapsedEventHandler dtfr = drawToFramerate;
             this.dh.MakeTimer(dtfr);
         }
 
-        public ArduinoDisplay(sbyte height, sbyte width, sbyte framerate = 50)
+        public ArduinoDisplay(sbyte height, sbyte width, sbyte framerate = 15)
         {
             this.dh.SetFramerate(framerate);
             this.dh.SetSize(height, width);
-            // Ensure button handling is initialized for this ctor as well
-            new ArduinoInput(SerialPortManager);
+
             initBoard();
+
             ElapsedEventHandler dtfr = drawToFramerate;
             this.dh.MakeTimer(dtfr);
         }
+
         public void DrawBatch(IEnumerable<ILocatedPixel> pixels)
         {
-           
-            List<byte> buffer = new List<byte>();
-
             foreach (var pixel in pixels)
             {
-                
-                buffer.Add((byte)pixel.Column);
-                buffer.Add((byte)pixel.Row);
-                buffer.Add(pixel.Red);
-                buffer.Add(pixel.Green);
-                buffer.Add(pixel.Blue);
-
-                
-            }
-
-            if (buffer.Count > 0 && SerialPortManager.SerialPort.IsOpen)
-            {
-                SerialPortManager.SerialPort.Write(buffer.ToArray(), 0, buffer.Count);
+                this.dh.Draw(pixel);
             }
         }
+
         private void initBoard()
         {
             this.dh.currentBoard = new Pixel[this.dh.height, this.dh.width];
@@ -71,68 +58,76 @@ namespace PixelBoard
             }
         }
 
-        private void drawToFramerate(Object source, ElapsedEventArgs e)
+        private void drawToFramerate(object source, ElapsedEventArgs e)
         {
-            if (finishedStreaming)
+            if (!finishedStreaming)
             {
-                finishedStreaming = false;
+                return;
+            }
+
+            if (!serialPortManager.SerialPort.IsOpen)
+            {
+                return;
+            }
+
+            finishedStreaming = false;
+
+            try
+            {
                 this.dh.RefreshDisplay(this);
+
                 Pixel[,] toDraw = new Pixel[this.dh.height, this.dh.width];
                 Array.Copy(this.dh.currentBoard, toDraw, this.dh.currentBoard.Length);
 
-                int streamLength = this.dh.height * this.dh.width * 3;
-                byte[] stream = new byte[streamLength];
+                byte[] rgb = new byte[OutputLedCount * 3];
 
                 int counter = 0;
-                for (sbyte i = 0; i < this.dh.height; i++)
+                for (sbyte j = 0; j < this.dh.width; j++)
                 {
-                    for (sbyte j = 0; j < this.dh.width; j++)
+                    bool reverseColumn = (j % 2 == 1); // Serpentine: reverse odd columns (vertical serpentine)
+
+                    for (sbyte i = 0; i < this.dh.height; i++)
                     {
-                        if (toDraw[i, j] != null)
+                        if (counter + 2 >= rgb.Length)
                         {
-                            stream[counter] = toDraw[Math.Abs(i - dh.height + 1), j].Red;
-                            stream[counter + 1] = toDraw[Math.Abs(i - dh.height + 1), j].Green;
-                            stream[counter + 2] = toDraw[Math.Abs(i - dh.height + 1), j].Blue;
+                            break;
                         }
+
+                        // No global vertical flip — row 0 is top in currentBoard.
+                        // For odd columns, iterate bottom-to-top; for even columns, top-to-bottom.
+                        sbyte row = reverseColumn ? (sbyte)(this.dh.height - 1 - i) : i;
+                        Pixel p = toDraw[row, j];
+                        if (p != null)
+                        {
+                            // Arduino expects GRB
+                            rgb[counter + 0] = p.Green;
+                            rgb[counter + 1] = p.Red;
+                            rgb[counter + 2] = p.Blue;
+                        }
+
                         counter += 3;
                     }
                 }
 
-                if (streamMode == "normal")
-                {
-                    string outScore = this.dh.currentLCDNumber;
-                    this.dh.lastLCDNumber = outScore;
+                ushort payloadLength = (ushort)rgb.Length;
 
-                    // Proper left-pad to 6 chars
-                    string paddedNum = outScore.PadLeft(6, ' ');
+                byte[] header = new byte[6];
+                header[0] = FrameMagic[0];
+                header[1] = FrameMagic[1];
+                header[2] = FrameMagic[2];
+                header[3] = FrameMagic[3];
+                header[4] = (byte)(payloadLength & 0xFF);
+                header[5] = (byte)((payloadLength >> 8) & 0xFF);
 
-                    byte[] LCDbytes = new byte[6];
-                    char[] intAsCharArray = paddedNum.ToCharArray();
-
-                    for (int i = 0; i < 6; i++)
-                    {
-                        LCDbytes[i] = Convert.ToByte(intAsCharArray[i]);
-                    }
-
-                    // Add sync marker
-                    byte[] syncMarker = new byte[] { 0xAA, 0x55 };
-
-                    var serial = SerialPortManager.SerialPort;
-                    if (serial.IsOpen)
-                    {
-                        serial.Write(syncMarker, 0, syncMarker.Length);
-                        serial.Write(LCDbytes, 0, LCDbytes.Length);
-                        serial.Write(stream, 0, streamLength);
-                    }
-                    else
-                    {
-                        Console.WriteLine("ArduinoDisplay: Serial port is not open; cannot send frame.");
-                    }
-                }
-                else if (streamMode == "partial")
-                {
-                    // TODO: Send partial update
-                }
+                serialPortManager.SerialPort.Write(header, 0, header.Length);
+                serialPortManager.SerialPort.Write(rgb, 0, rgb.Length);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[PixelBoard] Serial write failed: {ex.Message}");
+            }
+            finally
+            {
                 finishedStreaming = true;
             }
         }
@@ -140,7 +135,6 @@ namespace PixelBoard
         public void DisplayInt(int value)
         {
             this.dh.DisplayInt(value);
-
         }
 
         public void DisplayInt(int value, bool? leftAligned)
