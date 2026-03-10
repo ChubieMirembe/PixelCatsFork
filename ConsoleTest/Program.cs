@@ -52,7 +52,7 @@ namespace SnakeGame
 
             var leaderboard = new ConsoleTest.LeaderboardClient(baseUrl, secret);
             IDisplay emulatorDisplay = new ConsoleDisplay();
-            // IDisplay hardwareDisplay = new ArduinoDisplay(); // Uncomment when hardware display is available
+             IDisplay hardwareDisplay = new ArduinoDisplay(); // Uncomment when hardware display is available
 
             // Initialize games
             games = new Dictionary<GameChoiceState, IGame>
@@ -243,17 +243,17 @@ namespace SnakeGame
                     if (int.TryParse(lastGameOverCode, out int codeInt))
                     {
                         emulatorDisplay.DisplayInt(codeInt);
-                        // hardwareDisplay.DisplayInt(codeInt);
+                         hardwareDisplay.DisplayInt(codeInt);
                     }
                 }
                 else
                 {
                     emulatorDisplay.DisplayInt(gameLocal.GetScore());
-                    // hardwareDisplay.DisplayInt(gameLocal.GetScore());
+                     hardwareDisplay.DisplayInt(gameLocal.GetScore());
                 }
 
                 emulatorDisplay.Draw(pixels);
-                // hardwareDisplay.Draw(pixels);
+                 hardwareDisplay.Draw(pixels);
             }
         }
 

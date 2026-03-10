@@ -18,19 +18,21 @@ namespace PixelBoard
 
         public ArduinoDisplay()
         {
-            
+            // ensure size is set before we initialise the board or start the timer
+            this.dh.SetSize(20, 10);
+
             new ArduinoInput(SerialPortManager); // This line must be here to allow button presses
             initBoard();
             ElapsedEventHandler dtfr = drawToFramerate;
             this.dh.MakeTimer(dtfr);
-            this.dh.SetSize(20, 10);
-
         }
 
         public ArduinoDisplay(sbyte height, sbyte width, sbyte framerate = 50)
         {
             this.dh.SetFramerate(framerate);
             this.dh.SetSize(height, width);
+            // Ensure button handling is initialized for this ctor as well
+            new ArduinoInput(SerialPortManager);
             initBoard();
             ElapsedEventHandler dtfr = drawToFramerate;
             this.dh.MakeTimer(dtfr);
@@ -52,7 +54,7 @@ namespace PixelBoard
                 
             }
 
-            if (buffer.Count > 0)
+            if (buffer.Count > 0 && SerialPortManager.SerialPort.IsOpen)
             {
                 SerialPortManager.SerialPort.Write(buffer.ToArray(), 0, buffer.Count);
             }
@@ -78,7 +80,8 @@ namespace PixelBoard
                 Pixel[,] toDraw = new Pixel[this.dh.height, this.dh.width];
                 Array.Copy(this.dh.currentBoard, toDraw, this.dh.currentBoard.Length);
 
-                byte[] stream = new byte[600];
+                int streamLength = this.dh.height * this.dh.width * 3;
+                byte[] stream = new byte[streamLength];
 
                 int counter = 0;
                 for (sbyte i = 0; i < this.dh.height; i++)
@@ -114,9 +117,17 @@ namespace PixelBoard
                     // Add sync marker
                     byte[] syncMarker = new byte[] { 0xAA, 0x55 };
 
-                    SerialPortManager.SerialPort.Write(syncMarker, 0, syncMarker.Length);
-                    SerialPortManager.SerialPort.Write(LCDbytes, 0, 6);
-                    SerialPortManager.SerialPort.Write(stream, 0, 600);
+                    var serial = SerialPortManager.SerialPort;
+                    if (serial.IsOpen)
+                    {
+                        serial.Write(syncMarker, 0, syncMarker.Length);
+                        serial.Write(LCDbytes, 0, LCDbytes.Length);
+                        serial.Write(stream, 0, streamLength);
+                    }
+                    else
+                    {
+                        Console.WriteLine("ArduinoDisplay: Serial port is not open; cannot send frame.");
+                    }
                 }
                 else if (streamMode == "partial")
                 {

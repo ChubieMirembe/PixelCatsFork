@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO.Ports;
 using System.Threading;
 
@@ -11,34 +10,56 @@ namespace PixelBoard
 
         public SerialPort SerialPort { get => serialPort; }
 
-        public SerialPortManager()
+        public SerialPortManager(string portName = "COM5", int baudRate = 115200)
         {
+            // Configure once
+            serialPort.PortName = portName;
+            serialPort.BaudRate = baudRate;
+            serialPort.Parity = Parity.None;
+            serialPort.DataBits = 8;
+            serialPort.StopBits = StopBits.One;
+            serialPort.Handshake = Handshake.None;
+
+            // Avoid accidental auto-reset on Arduino while debugging — toggle as needed
+            serialPort.DtrEnable = false;
+            serialPort.RtsEnable = false;
+
+            // Prevent blocking ReadByte/Write calls from hanging indefinitely
+            serialPort.ReadTimeout = 500;
+            serialPort.WriteTimeout = 500;
+
+            // Try to open with a modest retry delay
             while (!serialPort.IsOpen)
             {
                 try
                 {
-                    serialPort.PortName = "COM3";
-                    serialPort.BaudRate = 1000000;
-                   // serialPort.WriteBufferSize = 64;
                     serialPort.Open();
+                    Console.WriteLine($"SerialPort opened: {serialPort.PortName} @ {serialPort.BaudRate}");
                 }
                 catch (UnauthorizedAccessException e)
                 {
-                    Console.WriteLine($"Error: {e.Message}");
+                    Console.WriteLine($"Access denied opening {portName}: {e.Message}");
                 }
                 catch (InvalidOperationException e)
                 {
-                    Console.WriteLine($"Error: {e.Message}");
+                    Console.WriteLine($"Invalid operation opening {portName}: {e.Message}");
                 }
                 catch (System.IO.IOException e)
                 {
-                    Console.WriteLine($"Error: {e.Message}");
+                    Console.WriteLine($"I/O error opening {portName}: {e.Message}");
                 }
                 catch (Exception e)
                 {
-                    Console.WriteLine($"Error: {e.Message}");
+                    Console.WriteLine($"Error opening {portName}: {e.Message}");
                 }
-                Thread.Sleep(1);
+
+                if (!serialPort.IsOpen)
+                {
+                    // Helpful diagnostic: show available ports once per retry
+                    var ports = SerialPort.GetPortNames();
+                    Console.WriteLine($"Available COM ports: {string.Join(", ", ports)}");
+                    Thread.Sleep(250); // avoid tight busy loop
+                }
             }
         }
     }

@@ -42,15 +42,16 @@ namespace PixelBoard
 
         private void HandleKeys(object sender, ArduinoButtonEventArgs e)
         {
-            if(e.Left)
+            if (e.Left)
             {
                 keybd_event((byte)VK_LEFT, 0, KEYEVENTF_EXTENDEDKEY | 0, 0);
             }
-            else if(LastLeft)
+            else if (LastLeft)
             {
                 keybd_event((byte)VK_LEFT, 0, KEYEVENTF_KEYUP | 0, 0);
             }
-            if(e.Right)
+
+            if (e.Right)
             {
                 keybd_event((byte)VK_RIGHT, 0, KEYEVENTF_EXTENDEDKEY | 0, 0);
             }
@@ -58,6 +59,7 @@ namespace PixelBoard
             {
                 keybd_event((byte)VK_RIGHT, 0, KEYEVENTF_KEYUP | 0, 0);
             }
+
             if (e.Fire)
             {
                 keybd_event((byte)VK_FIRE, 0, KEYEVENTF_EXTENDEDKEY | 0, 0);
@@ -66,62 +68,110 @@ namespace PixelBoard
             {
                 keybd_event((byte)VK_FIRE, 0, KEYEVENTF_KEYUP | 0, 0);
             }
+
+            // Fix: remember state for next call so KEYUP can be sent
+            LastLeft = e.Left;
+            LastRight = e.Right;
+            LastFire = e.Fire;
         }
 
 
         private void ManageKeyPresses(ButtonEventHandler buttonPressEvent)
         {
-            Thread buttonManager = new Thread(ButtonThread);
+            Thread buttonManager = new Thread(ButtonThread)
+            {
+                IsBackground = true
+            };
             ButtonPressEvent += buttonPressEvent;
             buttonManager.Start();
         }
 
         private void ButtonThread()
         {
+            var serial = SerialPortManager.SerialPort;
+
             while (true)
             {
-                if (SerialPortManager.SerialPort.IsOpen)
+                try
                 {
-                    if(SerialPortManager.SerialPort.BytesToRead > 0)
+                    if (serial.IsOpen)
                     {
-                        if(Convert.ToChar(SerialPortManager.SerialPort.ReadByte()) == 'b')
+                        // Read bytes one-at-a-time to resynchronize on marker 'b'
+                        // We rely on ReadTimeout on the SerialPort to avoid blocking forever
+                        int b = -1;
+                        try
                         {
-                            int input = SerialPortManager.SerialPort.ReadByte();
-                            ArduinoButtonEventArgs e;
-                            switch (input)
-                            {
-                                case 7:
-                                    e = new ArduinoButtonEventArgs(true, true, true);
-                                    break;
-                                case 6:
-                                    e = new ArduinoButtonEventArgs(true, true, false);
-                                    break;
-                                case 5:
-                                    e = new ArduinoButtonEventArgs(true, false, true);
-                                    break;
-                                case 4:
-                                    e = new ArduinoButtonEventArgs(true, false, false);
-                                    break;
-                                case 3:
-                                    e = new ArduinoButtonEventArgs(false, true, true);
-                                    break;
-                                case 2:
-                                    e = new ArduinoButtonEventArgs(false, true, false);
-                                    break;
-                                case 1:
-                                    e = new ArduinoButtonEventArgs(false, false, true);
-                                    break;
-                                case 0:
-                                    e = new ArduinoButtonEventArgs(false, false, false);
-                                    break;
-                                default:
-                                    continue;
-                            }
+                            b = serial.ReadByte();
+                        }
+                        catch (TimeoutException)
+                        {
+                            // no data available right now
+                            b = -1;
+                        }
 
-                            ButtonPressEvent.Invoke(this, e);
+                        if (b == -1)
+                        {
+                            // nothing to process
+                        }
+                        else if (b == 'b')
+                        {
+                            // Expect a single payload byte next; ReadByte will throw TimeoutException if not available
+                            try
+                            {
+                                int input = serial.ReadByte();
+                                ArduinoButtonEventArgs e;
+                                switch (input)
+                                {
+                                    case 7:
+                                        e = new ArduinoButtonEventArgs(true, true, true);
+                                        break;
+                                    case 6:
+                                        e = new ArduinoButtonEventArgs(true, true, false);
+                                        break;
+                                    case 5:
+                                        e = new ArduinoButtonEventArgs(true, false, true);
+                                        break;
+                                    case 4:
+                                        e = new ArduinoButtonEventArgs(true, false, false);
+                                        break;
+                                    case 3:
+                                        e = new ArduinoButtonEventArgs(false, true, true);
+                                        break;
+                                    case 2:
+                                        e = new ArduinoButtonEventArgs(false, true, false);
+                                        break;
+                                    case 1:
+                                        e = new ArduinoButtonEventArgs(false, false, true);
+                                        break;
+                                    case 0:
+                                        e = new ArduinoButtonEventArgs(false, false, false);
+                                        break;
+                                    default:
+                                        // unexpected payload; ignore and continue
+                                        Console.WriteLine($"ArduinoInput: unexpected payload byte {input}");
+                                        continue;
+                                }
+
+                                ButtonPressEvent?.Invoke(this, e);
+                            }
+                            catch (TimeoutException)
+                            {
+                                // payload didn't arrive in time; loop and resync
+                            }
+                        }
+                        else
+                        {
+                            // Not the marker; log once for diagnostics then continue scanning until marker found.
+                            Console.WriteLine($"ArduinoInput: discarded byte {b} (0x{b:X2}) while waiting for marker 'b'");
                         }
                     }
                 }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"ArduinoInput ButtonThread error: {ex.Message}");
+                }
+
+                Thread.Sleep(10); // avoid busy loop
             }
         }
     }
