@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Timers;
+using System.Text;
 
 namespace PixelBoard
 {
@@ -10,13 +11,16 @@ namespace PixelBoard
         private bool finishedStreaming = true;
         private readonly SerialPortManager serialPortManager = new SerialPortManager();
 
+        // Add a lock so PBFR (large frame) and PBLC (small LCD) writes are atomic w.r.t each other.
+        private readonly object serialLock = new object();
+
         private const int OutputLedCount = 256;
         private static readonly byte[] FrameMagic = new byte[] { (byte)'P', (byte)'B', (byte)'F', (byte)'R' };
 
         public ArduinoDisplay()
         {
             // Leave this disabled until host display is confirmed working.
-            // new ArduinoInput(serialPortManager);
+            new ArduinoInput(serialPortManager);
 
             this.dh.SetSize(20, 10);
             this.dh.SetFramerate(15);
@@ -119,8 +123,12 @@ namespace PixelBoard
                 header[4] = (byte)(payloadLength & 0xFF);
                 header[5] = (byte)((payloadLength >> 8) & 0xFF);
 
-                serialPortManager.SerialPort.Write(header, 0, header.Length);
-                serialPortManager.SerialPort.Write(rgb, 0, rgb.Length);
+                // Ensure the two writes (header + payload) are atomic with respect to LCD writes.
+                lock (serialLock)
+                {
+                    serialPortManager.SerialPort.Write(header, 0, header.Length);
+                    serialPortManager.SerialPort.Write(rgb, 0, rgb.Length);
+                }
             }
             catch (Exception ex)
             {
@@ -134,12 +142,20 @@ namespace PixelBoard
 
         public void DisplayInt(int value)
         {
+            // Update local state first
             this.dh.DisplayInt(value);
+
+            // Send LCD packet to Arduino
+            SendLcdTextToArduino(this.dh.currentLCDNumber);
         }
 
         public void DisplayInt(int value, bool? leftAligned)
         {
+            // Update local state first
             this.dh.DisplayInt(value, leftAligned);
+
+            // Send LCD packet to Arduino
+            SendLcdTextToArduino(this.dh.currentLCDNumber);
         }
 
         public void DisplayInts(int leftValue, int rightValue)
@@ -155,6 +171,41 @@ namespace PixelBoard
         public void Draw(ILocatedPixel pixel)
         {
             this.dh.Draw(pixel);
+        }
+
+        private void SendLcdTextToArduino(string text)
+        {
+            if (string.IsNullOrEmpty(text)) text = "";
+
+            var serial = serialPortManager.SerialPort;
+            if (serial == null || !serial.IsOpen) return;
+
+            try
+            {
+                // Packet: 4-byte magic 'P','B','L','C' + 2-byte length (little-endian) + payload bytes (UTF8)
+                byte[] magic = new byte[] { (byte)'P', (byte)'B', (byte)'L', (byte)'C' };
+                byte[] payload = Encoding.UTF8.GetBytes(text);
+                ushort len = (ushort)payload.Length;
+                byte[] header = new byte[6];
+                header[0] = magic[0];
+                header[1] = magic[1];
+                header[2] = magic[2];
+                header[3] = magic[3];
+                header[4] = (byte)(len & 0xFF);
+                header[5] = (byte)((len >> 8) & 0xFF);
+
+                // Hold the same lock as frame writes to avoid interleaving
+                lock (serialLock)
+                {
+                    serial.Write(header, 0, header.Length);
+                    if (len > 0)
+                        serial.Write(payload, 0, payload.Length);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[PixelBoard] Failed to send LCD packet: {ex.Message}");
+            }
         }
     }
 }
