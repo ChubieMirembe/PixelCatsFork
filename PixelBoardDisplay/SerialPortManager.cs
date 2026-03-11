@@ -33,7 +33,9 @@ namespace PixelBoard
                     Thread.Sleep(2000);
                     serialPort.DiscardInBuffer();
                     serialPort.DiscardOutBuffer();
-                    Console.WriteLine("[PixelBoard] Connected to COM10");
+                    serialPort.DtrEnable = true;
+                    serialPort.RtsEnable = true;
+                    Console.WriteLine($"[PixelBoard] Connected to {serialPort.PortName}");
                 }
                 catch (UnauthorizedAccessException e)
                 {
