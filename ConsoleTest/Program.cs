@@ -44,13 +44,15 @@ namespace SnakeGame
                 _ = bool.TryParse(useEmulatorValue, out useEmulator);
             }
             var baseUrl = _config["Leaderboard:BaseUrl"] ?? "http://127.0.0.1:3000";
-            var secret = _config["LEADERBOARD_DEVICE_HMAC_SECRET"];
-            if (string.IsNullOrWhiteSpace(secret))
-                throw new Exception("Missing env var LEADERBOARD_DEVICE_HMAC_SECRET");
-            // pick game_code based on current game selection
-           
 
-            var leaderboard = new ConsoleTest.LeaderboardClient(baseUrl, secret);
+            string GetSecretForGame(GameChoiceState g) => g switch
+            {
+                GameChoiceState.Snake => _config["LEADERBOARD_HMAC_SNAKE"] ?? "",
+                GameChoiceState.Tetris => _config["LEADERBOARD_HMAC_TETRIS"] ?? "",
+                GameChoiceState.Education => _config["LEADERBOARD_HMAC_EDU"] ?? "",
+                _ => ""
+            };
+
             IDisplay emulatorDisplay = new ConsoleDisplay();
              IDisplay hardwareDisplay = new ArduinoDisplay(); // Uncomment when hardware display is available
 
@@ -176,13 +178,19 @@ namespace SnakeGame
                     int finalScore = gameLocal.GetScore();
                     try
                     {
-                        // Use per-game token from the game itself
-                        string claimCode = await leaderboard.MintClaimCodeAsync(gameLocal.GameId, finalScore);
+                        string gameCode = gameLocal.GameId;
+
+                        string secret = GetSecretForGame(game);
+                        if (string.IsNullOrWhiteSpace(secret))
+                            throw new Exception($"Missing env var for {game}. Set LEADERBOARD_HMAC_{game.ToString().ToUpperInvariant()}");
+
+                        var leaderboard = new ConsoleTest.LeaderboardClient(baseUrl, secret);
+                        string claimCode = await leaderboard.MintClaimCodeAsync(gameCode, finalScore);
+
                         lastGameOverCode = claimCode;
                         gameLocal.SetGameOverCode(claimCode);
 
                         WriteScoreFileAtomic(scoreFilePath, finalScore, gameLocal, state: "GameOver", code: claimCode);
-
                         Console.WriteLine($"[ConsoleTest] Final score: {finalScore}, server code: {claimCode}");
                     }
                     catch (Exception ex)
