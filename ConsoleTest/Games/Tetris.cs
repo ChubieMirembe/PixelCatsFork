@@ -8,12 +8,14 @@ namespace ConsoleTest.Games
     public class Tetris : IGame
     {
         // Unique identifier for this game. Replace with the real ID provided by the site.
-        public string GameId { get; } = "TETRIS_GAME_ID";
-
+        public string GameId { get; } = "bCbC7cpanUA";
+        private int? holdPieceIndex = null;
+        private bool holdLocked = false;
+        private int nextPieceIndex = 0;
         private int score = 0;
         private int level = 0;  // Level for authentic scoring
         private int[,] board = new int[20, 10]; // 0 = empty, 1+ = filled
-        private Tetromino currentPiece;
+        private Tetromino? currentPiece;
         private int pieceX;
         private int pieceY;
         private Random rand = new Random();
@@ -103,6 +105,9 @@ namespace ConsoleTest.Games
             rotateCooldown = 0;
             gameOverCode = null;  // Reset code
             codeTcs = null;
+            holdPieceIndex = null;
+            holdLocked = false;
+            nextPieceIndex = rand.Next(SHAPES.Length);
             SpawnNewPiece();
         }
 
@@ -191,32 +196,29 @@ namespace ConsoleTest.Games
         {
             if (gameOver)
             {
-                // Allow escape to return to title
                 if (key == ConsoleKey.Escape)
-                {
                     stateChanged = true;
-                }
                 return;
             }
 
             switch (key)
             {
-                case ConsoleKey.A:   // Move left
+                case ConsoleKey.A:
                 case ConsoleKey.LeftArrow:
                     MovePiece(-1, 0);
                     break;
-                case ConsoleKey.D:   // Move right
+
+                case ConsoleKey.D:
                 case ConsoleKey.RightArrow:
                     MovePiece(1, 0);
                     break;
-                case ConsoleKey.S:   // Move down faster (soft drop)
+
+                case ConsoleKey.S:
                 case ConsoleKey.DownArrow:
-                    // Only allow manual drop if cooldown expired
                     if (manualDropCooldown <= 0)
                     {
                         if (MovePiece(0, 1))
                         {
-                            // Soft drop bonus:   1 point per cell dropped
                             score += 1;
                         }
                         else
@@ -225,30 +227,120 @@ namespace ConsoleTest.Games
                             ClearLines();
                             SpawnNewPiece();
                             if (!IsValidPosition(pieceX, pieceY))
-                            {
                                 gameOver = true;
-                            }
                         }
                         manualDropCooldown = 1;
                     }
                     break;
-                case ConsoleKey.W:  // Rotate
-                case ConsoleKey.UpArrow:
-                case ConsoleKey.Spacebar:
-                    // Only allow rotation if cooldown expired
+
+                case ConsoleKey.W: // HOLD
+                    DoHold();
+                    break;
+
+                case ConsoleKey.Q: // Rotate left
                     if (rotateCooldown <= 0)
                     {
-                        RotatePiece();
-                        rotateCooldown = 5;  // Prevent rotation for 3 frames (~300ms)
+                        RotateLeft();
+                        rotateCooldown = 5;
                     }
                     break;
+
+                case ConsoleKey.E: // Rotate right
+                    if (rotateCooldown <= 0)
+                    {
+                        RotateRight();
+                        rotateCooldown = 5;
+                    }
+                    break;
+
                 case ConsoleKey.Escape:
-                    // Signal Program that user requested to leave the playing state
                     stateChanged = true;
                     break;
             }
         }
+        private void DoHold()
+        {
+            if (holdLocked) return;
+            if (currentPiece == null) return;
 
+            holdLocked = true;
+
+            int curIndex = currentPiece.ColorIndex;
+
+            if (holdPieceIndex == null)
+            {
+                holdPieceIndex = curIndex;
+                SpawnNewPiece(); // take the next piece
+                return;
+            }
+
+            int swap = holdPieceIndex.Value;
+            holdPieceIndex = curIndex;
+
+            currentPiece = new Tetromino(swap);
+            pieceX = 5 - currentPiece.Shape.GetLength(1) / 2;
+            pieceY = 0;
+
+            if (!IsValidPosition(pieceX, pieceY))
+                gameOver = true;
+        }
+
+        private void RotateRight()
+        {
+            if (currentPiece == null) return;
+            RotatePieceClockwise();
+        }
+        private static char PieceChar(int index) => index switch
+        {
+            0 => '│',
+            1 => '▄',
+            2 => '┤',
+            3 => 'S',
+            4 => 'Z',
+            5 => 'J',
+            6 => 'L',
+            _ => ' '
+        };
+
+        public string GetHudText()
+        {
+            char hold = holdPieceIndex is int h ? PieceChar(h) : ' ';
+            char next = PieceChar(nextPieceIndex);
+
+            int last3 = Math.Abs(score) % 1000;
+            string s3 = last3.ToString("D3");
+
+            // digit0=hold, digit1=divider, digit2=next, digit3-5=score
+            return $"{hold}-{next}{s3}";
+        }
+        private void RotateLeft()
+        {
+            if (currentPiece == null) return;
+
+            // Rotate CCW = rotate CW 3 times (simple + fine for this project)
+            RotatePieceClockwise();
+            RotatePieceClockwise();
+            RotatePieceClockwise();
+        }
+
+        private void RotatePieceClockwise()
+        {
+            if (currentPiece == null) return;
+
+            currentPiece.Rotate();
+
+            // same kick logic you already had
+            if (!IsValidPosition(pieceX, pieceY))
+            {
+                if (IsValidPosition(pieceX - 1, pieceY)) pieceX--;
+                else if (IsValidPosition(pieceX + 1, pieceY)) pieceX++;
+                else
+                {
+                    // rotate back
+                    for (int i = 0; i < 3; i++) currentPiece.Rotate();
+                }
+            }
+        }
         public bool IsGameOver() => gameOver;
 
         public string GetGameOverCode() => gameOverCode;  // Return the generated code (may be null)
@@ -263,25 +355,25 @@ namespace ConsoleTest.Games
 
         private void SpawnNewPiece()
         {
-            currentPiece = new Tetromino(rand.Next(SHAPES.Length));
+            // If first spawn, initialize next
+
+            int curIndex = nextPieceIndex;
+            nextPieceIndex = rand.Next(SHAPES.Length);
+
+            currentPiece = new Tetromino(curIndex);
+
             pieceX = 5 - currentPiece.Shape.GetLength(1) / 2;
             pieceY = 0;
             frameCounter = 0;
 
-            // Clear console input buffer to prevent buffered keys from affecting new piece.
-            // In CI/headless test runs, Console.KeyAvailable can throw InvalidOperationException,
-            // so guard it and simply skip clearing when no console is available.
+            holdLocked = false;
+
+            // (keep your console buffer clear try/catch if you want it)
             try
             {
-                while (Console.KeyAvailable)
-                {
-                    Console.ReadKey(true);
-                }
+                while (Console.KeyAvailable) Console.ReadKey(true);
             }
-            catch (InvalidOperationException)
-            {
-                // No interactive console (e.g., CI runner / redirected input). Safe to ignore.
-            }
+            catch (InvalidOperationException) { }
         }
 
 
@@ -298,34 +390,70 @@ namespace ConsoleTest.Games
             }
             return false;
         }
-
-        private void RotatePiece()
+        private int PieceToDigit(int pieceIndex)
         {
-            currentPiece.Rotate();
-
-            // If rotation causes collision, try to adjust position
-            if (!IsValidPosition(pieceX, pieceY))
-            {
-                // Try shifting left or right
-                if (IsValidPosition(pieceX - 1, pieceY))
-                {
-                    pieceX--;
-                }
-                else if (IsValidPosition(pieceX + 1, pieceY))
-                {
-                    pieceX++;
-                }
-                else
-                {
-                    // Rotation not possible, rotate back
-                    for (int i = 0; i < 3; i++)
-                        currentPiece.Rotate();
-                }
-            }
+            // I=1..L=7
+            if (pieceIndex < 0 || pieceIndex > 6) return 0;
+            return pieceIndex + 1;
         }
 
+        public int GetHudInt()
+        {
+            int holdDigit = holdPieceIndex.HasValue ? PieceToDigit(holdPieceIndex.Value) : 0;
+            int divDigit = 8;
+            int nextDigit = PieceToDigit(nextPieceIndex);
+            int last3 = Math.Abs(score) % 1000;
+
+            // enforce bounds
+            holdDigit = Math.Clamp(holdDigit, 0, 7);
+            nextDigit = Math.Clamp(nextDigit, 0, 7);
+
+            return holdDigit * 100000 + divDigit * 10000 + nextDigit * 1000 + last3;
+        }
+        private static byte SegById(int segId)
+        {
+            if (segId < 1 || segId > 7) return 0;
+            return (byte)(1 << (segId - 1));
+        }
+        private static byte PieceMask(int type) => type switch
+        {
+            6 => (byte)(SegById(1) | SegById(6) | SegById(5)),                 // L
+            2 => (byte)(SegById(1) | SegById(7) | SegById(6)),                 // T
+            0 => (byte)(SegById(1) | SegById(6)),                              // I
+            1 => (byte)(SegById(6) | SegById(7) | SegById(4) | SegById(5)),    // O
+            4 => (byte)(SegById(2) | SegById(3) | SegById(7) | SegById(6) | SegById(5)), // Z ("2")
+            3 => (byte)(SegById(2) | SegById(1) | SegById(7) | SegById(4) | SegById(5)), // S ("5")
+            5 => (byte)(SegById(3) | SegById(4) | SegById(5)),                 // J
+            _ => (byte)0
+
+        };
+        public byte GetHoldMaskForHud()
+        {
+            if (!holdPieceIndex.HasValue) return 0;
+            return PieceMask(holdPieceIndex.Value);
+        }
+
+        public byte GetNextMaskForHud()
+        {
+            return PieceMask(nextPieceIndex);
+        }
+
+        public (byte r, byte g, byte b) GetHoldColorForHud()
+        {
+            if (!holdPieceIndex.HasValue) return (0, 0, 0);
+            Color c = PIECE_COLORS[holdPieceIndex.Value];
+            return ((byte)c.R, (byte)c.G, (byte)c.B);
+        }
+
+        public (byte r, byte g, byte b) GetNextColorForHud()
+        {
+            Color c = PIECE_COLORS[nextPieceIndex];
+            return ((byte)c.R, (byte)c.G, (byte)c.B);
+        }
         private bool IsValidPosition(int x, int y)
         {
+            if (currentPiece == null) return false;
+
             int rows = currentPiece.Shape.GetLength(0);
             int cols = currentPiece.Shape.GetLength(1);
 
@@ -353,6 +481,7 @@ namespace ConsoleTest.Games
 
         private void LockPiece()
         {
+            if (currentPiece == null) return;
             int rows = currentPiece.Shape.GetLength(0);
             int cols = currentPiece.Shape.GetLength(1);
 

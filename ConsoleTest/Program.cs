@@ -256,8 +256,44 @@ namespace SnakeGame
                 }
                 else
                 {
-                    emulatorDisplay.DisplayInt(gameLocal.GetScore());
-                     hardwareDisplay.DisplayInt(gameLocal.GetScore());
+                    if (gameLocal is ConsoleTest.Games.Tetris tetris && state == State.Playing)
+                    {
+                        // Emulator can still show whatever you want (score or hud int)
+                        emulatorDisplay.DisplayText(tetris.GetHudText());
+
+                        if (hardwareDisplay is PixelBoard.ArduinoDisplay arduino)
+                        {
+                            // Divider is always the middle segment only (segment id 7)
+                            byte dividerMask = 1 << (7 - 1); // == 0b0100_0000 == 64
+
+                            byte holdMask = tetris.GetHoldMaskForHud(); // you'll add this
+                            byte nextMask = tetris.GetNextMaskForHud(); // you'll add this
+
+                            var holdCol = tetris.GetHoldColorForHud();  // you'll add this
+                            var divCol = ((byte)60, (byte)60, (byte)60);
+                            var nextCol = tetris.GetNextColorForHud();  // you'll add this
+
+                            arduino.Display7SegHud(
+                                holdMask,
+                                dividerMask,
+                                nextMask,
+                                holdCol,
+                                divCol,
+                                nextCol,
+                                tetris.GetScore()
+                            );
+                        }
+                        else
+                        {
+                            // fallback if not arduino
+                            hardwareDisplay.DisplayInt(tetris.GetScore());
+                        }
+                    }
+                    else
+                    {
+                        emulatorDisplay.DisplayInt(gameLocal.GetScore());
+                        hardwareDisplay.DisplayInt(gameLocal.GetScore());
+                    }
                 }
 
                 emulatorDisplay.Draw(pixels);

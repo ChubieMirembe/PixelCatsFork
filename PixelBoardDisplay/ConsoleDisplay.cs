@@ -150,5 +150,11 @@ namespace PixelBoard
         {
             this.dh.Draw(pixel);
         }
+
+        public void DisplayText(string text)
+        {
+            // Update local state first
+            this.dh.currentLCDNumber = text ?? "";
+        }
     }
 }

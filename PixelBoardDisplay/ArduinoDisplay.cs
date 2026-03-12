@@ -172,7 +172,14 @@ namespace PixelBoard
         {
             this.dh.Draw(pixel);
         }
+        public void DisplayText(string text)
+        {
+            // Update local state first
+            this.dh.currentLCDNumber = text ?? "";
 
+            // Send LCD packet to Arduino
+            SendLcdTextToArduino(this.dh.currentLCDNumber);
+        }
         private void SendLcdTextToArduino(string text)
         {
             if (string.IsNullOrEmpty(text)) text = "";
@@ -205,6 +212,47 @@ namespace PixelBoard
             catch (Exception ex)
             {
                 Console.WriteLine($"[PixelBoard] Failed to send LCD packet: {ex.Message}");
+            }
+        }
+        public void Display7SegHud(byte mask0, byte mask1, byte mask2,
+                           (byte r, byte g, byte b) col0,
+                           (byte r, byte g, byte b) col1,
+                           (byte r, byte g, byte b) col2,
+                           int score)
+        {
+            var serial = serialPortManager.SerialPort;
+            if (serial == null || !serial.IsOpen) return;
+
+            int last3 = Math.Abs(score) % 1000;
+            byte d100 = (byte)((last3 / 100) % 10);
+            byte d10 = (byte)((last3 / 10) % 10);
+            byte d1 = (byte)((last3 / 1) % 10);
+
+            byte[] payload = new byte[15];
+            payload[0] = mask0;
+            payload[1] = mask1;
+            payload[2] = mask2;
+
+            payload[3] = col0.r; payload[4] = col0.g; payload[5] = col0.b;
+            payload[6] = col1.r; payload[7] = col1.g; payload[8] = col1.b;
+            payload[9] = col2.r; payload[10] = col2.g; payload[11] = col2.b;
+
+            payload[12] = d100;
+            payload[13] = d10;
+            payload[14] = d1;
+
+            byte[] header = new byte[6];
+            header[0] = (byte)'P';
+            header[1] = (byte)'B';
+            header[2] = (byte)'7';
+            header[3] = (byte)'S';
+            header[4] = (byte)(payload.Length & 0xFF);
+            header[5] = (byte)((payload.Length >> 8) & 0xFF);
+
+            lock (serialLock)
+            {
+                serial.Write(header, 0, header.Length);
+                serial.Write(payload, 0, payload.Length);
             }
         }
     }
