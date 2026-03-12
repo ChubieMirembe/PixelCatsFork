@@ -421,8 +421,8 @@ namespace ConsoleTest.Games
             2 => (byte)(SegById(1) | SegById(7) | SegById(6)),                 // T
             0 => (byte)(SegById(1) | SegById(6)),                              // I
             1 => (byte)(SegById(6) | SegById(7) | SegById(4) | SegById(5)),    // O
-            4 => (byte)(SegById(2) | SegById(3) | SegById(7) | SegById(6) | SegById(5)), // Z ("2")
-            3 => (byte)(SegById(2) | SegById(1) | SegById(7) | SegById(4) | SegById(5)), // S ("5")
+            4 => (byte)(SegById(3) | SegById(7) | SegById(6)), // Z ("2")
+            3 => (byte) (SegById(1) | SegById(7) | SegById(4)), // S ("5")
             5 => (byte)(SegById(3) | SegById(4) | SegById(5)),                 // J
             _ => (byte)0
 
