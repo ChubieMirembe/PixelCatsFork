@@ -174,7 +174,6 @@ namespace SnakeGame
                     gameLocal.Update(pixels);
 
                     // Write final score first to avoid race with server-side generation.
-                    // Do NOT attempt to rely on an in-game code being already present.
                     int finalScore = gameLocal.GetScore();
                     try
                     {
@@ -197,42 +196,6 @@ namespace SnakeGame
                     {
                         Console.WriteLine($"[ConsoleTest] Failed to mint claim code: {ex.Message}");
                     }
-
-                    //// Now request the server to store the score and return the six-digit code.
-                    //try
-                    //{
-                    //    // Block synchronously up to CodeGenerator's timeout so the code is available for display immediately.
-                    //    // This ensures the file has been written before we call the server.
-                    //    var code = ConsoleTest.CodeGenerator.GenerateSixDigitCodeAsync(finalScore, gameLocal.GameId ?? string.Empty, allowFallback: true, timeoutSeconds: 3)
-                    //        .GetAwaiter().GetResult();
-
-                    //    if (!string.IsNullOrEmpty(code))
-                    //    {
-                    //        lastGameOverCode = code;
-                    //        // Give the game the retrieved code so it can display it.
-                    //        gameLocal.SetGameOverCode(lastGameOverCode);
-                    //        Console.WriteLine($"[ConsoleTest] Server generated code: {lastGameOverCode}");
-
-                    //        // Also write the score file again including the code so external consumers can pick it up.
-                    //        try
-                    //        {
-                    //            WriteScoreFileAtomic(scoreFilePath, finalScore, gameLocal, state: "GameOver", code: lastGameOverCode);
-                    //            Console.WriteLine($"[ConsoleTest] Updated score file with code: {lastGameOverCode}");
-                    //        }
-                    //        catch (Exception ex)
-                    //        {
-                    //            Console.WriteLine($"[ConsoleTest] Failed to write score file with code to '{scoreFilePath}': {ex.GetType().Name}: {ex.Message}");
-                    //        }
-                    //    }
-                    //    else
-                    //    {
-                    //        Console.WriteLine("[ConsoleTest] Server did not return a code; using local fallback (if any).");
-                    //    }
-                    //}
-                    //catch (Exception ex)
-                    //{
-                    //    Console.WriteLine($"[ConsoleTest] Failed to obtain server-generated code: {ex.GetType().Name}: {ex.Message}");
-                    //}
 
                     Thread.Sleep(1000);
 
@@ -258,20 +221,20 @@ namespace SnakeGame
                 {
                     if (gameLocal is ConsoleTest.Games.Tetris tetris && state == State.Playing)
                     {
-                        // Emulator can still show whatever you want (score or hud int)
+                        // Emulator 
                         emulatorDisplay.DisplayText(tetris.GetHudText());
 
+                        // Hardware
                         if (hardwareDisplay is PixelBoard.ArduinoDisplay arduino)
                         {
-                            // Divider is always the middle segment only (segment id 7)
-                            byte dividerMask = 1 << (7 - 1); // == 0b0100_0000 == 64
+                            byte dividerMask = 1 << (7 - 1);
 
-                            byte holdMask = tetris.GetHoldMaskForHud(); // you'll add this
-                            byte nextMask = tetris.GetNextMaskForHud(); // you'll add this
+                            byte holdMask = tetris.GetHoldMaskForHud(); 
+                            byte nextMask = tetris.GetNextMaskForHud(); 
 
-                            var holdCol = tetris.GetHoldColorForHud();  // you'll add this
+                            var holdCol = tetris.GetHoldColorForHud();  
                             var divCol = ((byte)60, (byte)60, (byte)60);
-                            var nextCol = tetris.GetNextColorForHud();  // you'll add this
+                            var nextCol = tetris.GetNextColorForHud();  
 
                             arduino.Display7SegHud(
                                 holdMask,

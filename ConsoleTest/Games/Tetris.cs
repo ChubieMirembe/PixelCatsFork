@@ -7,7 +7,7 @@ namespace ConsoleTest.Games
 {
     public class Tetris : IGame
     {
-        // Unique identifier for this game. Replace with the real ID provided by the site.
+        // Unique identifier for this game.
         public string GameId { get; } = "bCbC7cpanUA";
         private int? holdPieceIndex = null;
         private bool holdLocked = false;
@@ -317,7 +317,7 @@ namespace ConsoleTest.Games
         {
             if (currentPiece == null) return;
 
-            // Rotate CCW = rotate CW 3 times (simple + fine for this project)
+            // Rotate CCW = rotate CW 3 times
             RotatePieceClockwise();
             RotatePieceClockwise();
             RotatePieceClockwise();
@@ -368,7 +368,7 @@ namespace ConsoleTest.Games
 
             holdLocked = false;
 
-            // (keep your console buffer clear try/catch if you want it)
+            
             try
             {
                 while (Console.KeyAvailable) Console.ReadKey(true);
