@@ -214,7 +214,7 @@ namespace SnakeGame
                     if (int.TryParse(lastGameOverCode, out int codeInt))
                     {
                         emulatorDisplay.DisplayInt(codeInt);
-                         hardwareDisplay.DisplayInt(codeInt);
+                        hardwareDisplay.DisplayInt(codeInt);
                     }
                 }
                 else
@@ -229,12 +229,12 @@ namespace SnakeGame
                         {
                             byte dividerMask = 1 << (7 - 1);
 
-                            byte holdMask = tetris.GetHoldMaskForHud(); 
-                            byte nextMask = tetris.GetNextMaskForHud(); 
+                            byte holdMask = tetris.GetHoldMaskForHud();
+                            byte nextMask = tetris.GetNextMaskForHud();
 
-                            var holdCol = tetris.GetHoldColorForHud();  
+                            var holdCol = tetris.GetHoldColorForHud();
                             var divCol = ((byte)60, (byte)60, (byte)60);
-                            var nextCol = tetris.GetNextColorForHud();  
+                            var nextCol = tetris.GetNextColorForHud();
 
                             arduino.Display7SegHud(
                                 holdMask,

@@ -25,6 +25,7 @@ namespace ConsoleTest.Games
         private int manualDropCooldown = 0;
         private int rotateCooldown = 0;  // Rotation cooldown
         private string gameOverCode = null;  // Game over code
+        private DateTime ignoreDownUntil = DateTime.MinValue; // suppress repeated Down presses for a short time
 
         private TaskCompletionSource<string?>? codeTcs;
 
@@ -201,20 +202,39 @@ namespace ConsoleTest.Games
                 return;
             }
 
+            // Dispatch to shared processor which can also consume extra queued keys when necessary
+            ProcessKey(key, ref stateChanged);
+        }
+
+        // Central key processor so we can consume queued keys (e.g., drop autorepeat) and immediately handle a subsequent non-drop key
+        private void ProcessKey(ConsoleKey key, ref bool stateChanged)
+        {
             switch (key)
             {
                 case ConsoleKey.A:
                 case ConsoleKey.LeftArrow:
+                    // pressing any horizontal input clears Down suppression so movement is responsive
+                    ignoreDownUntil = DateTime.MinValue;
                     MovePiece(-1, 0);
+                    DrainInput();
                     break;
 
                 case ConsoleKey.D:
                 case ConsoleKey.RightArrow:
+                    ignoreDownUntil = DateTime.MinValue;
                     MovePiece(1, 0);
+                    DrainInput();
                     break;
 
                 case ConsoleKey.S:
                 case ConsoleKey.DownArrow:
+                    // If we're in a short suppression window, drain further Down repeats and process the next non-Down key immediately (if any).
+                    if (DateTime.UtcNow < ignoreDownUntil)
+                    {
+                        DrainDownsAndProcessFirstNonDown(ref stateChanged);
+                        break;
+                    }
+
                     if (manualDropCooldown <= 0)
                     {
                         if (MovePiece(0, 1))
@@ -229,34 +249,71 @@ namespace ConsoleTest.Games
                             if (!IsValidPosition(pieceX, pieceY))
                                 gameOver = true;
                         }
-                        manualDropCooldown = 1;
+                        manualDropCooldown = 2; // small cooldown to reduce OS repeat sensitivity
                     }
+                    else
+                    {
+                        // start a short suppression window so repeated OS events are ignored instead of queued
+                        ignoreDownUntil = DateTime.UtcNow.AddMilliseconds(200);
+                    }
+
+                    // After handling one Down event, aggressively collapse any immediate Down repeats in the OS buffer
+                    // and, if present, handle the first queued non-Down key right away so it doesn't get stuck behind repeats.
+                    DrainDownsAndProcessFirstNonDown(ref stateChanged);
                     break;
 
                 case ConsoleKey.W: // HOLD
+                    ignoreDownUntil = DateTime.MinValue;
                     DoHold();
+                    DrainInput();
                     break;
 
                 case ConsoleKey.Q: // Rotate left
+                    ignoreDownUntil = DateTime.MinValue;
                     if (rotateCooldown <= 0)
                     {
                         RotateLeft();
                         rotateCooldown = 5;
                     }
+                    DrainInput();
                     break;
 
                 case ConsoleKey.E: // Rotate right
+                    ignoreDownUntil = DateTime.MinValue;
                     if (rotateCooldown <= 0)
                     {
                         RotateRight();
                         rotateCooldown = 5;
                     }
+                    DrainInput();
                     break;
 
                 case ConsoleKey.Escape:
+                    ignoreDownUntil = DateTime.MinValue;
                     stateChanged = true;
+                    score = 0; // reset score so it doesn't carry over if we return to title and start a new game
+                    DrainInput();
                     break;
             }
+        }
+
+        // Drain consecutive Down/S repeats from the Console buffer and immediately handle the first non-Down key (if any).
+        private void DrainDownsAndProcessFirstNonDown(ref bool stateChanged)
+        {
+            try
+            {
+                while (Console.KeyAvailable)
+                {
+                    var kr = Console.ReadKey(true);
+                    if (kr.Key == ConsoleKey.S || kr.Key == ConsoleKey.DownArrow)
+                        continue; // drop repeat - skip
+
+                    // Found a non-Down key queued after repeats: process it right away.
+                    ProcessKey(kr.Key, ref stateChanged);
+                    return;
+                }
+            }
+            catch (InvalidOperationException) { }
         }
         private void DoHold()
         {
@@ -368,7 +425,6 @@ namespace ConsoleTest.Games
 
             holdLocked = false;
 
-            
             try
             {
                 while (Console.KeyAvailable) Console.ReadKey(true);
@@ -477,6 +533,16 @@ namespace ConsoleTest.Games
                 }
             }
             return true;
+        }
+
+        // Drain any pending console input (used to discard repeated Down key repeats)
+        private void DrainInput()
+        {
+            try
+            {
+                while (Console.KeyAvailable) Console.ReadKey(true);
+            }
+            catch (InvalidOperationException) { }
         }
 
         private void LockPiece()
