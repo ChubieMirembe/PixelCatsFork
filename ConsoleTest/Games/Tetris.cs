@@ -287,6 +287,10 @@ namespace ConsoleTest.Games
                     }
                     DrainInput();
                     break;
+                case ConsoleKey.R:
+                    // debug add 100 points
+                    score += 100;
+                    break;
 
                 case ConsoleKey.Escape:
                     ignoreDownUntil = DateTime.MinValue;

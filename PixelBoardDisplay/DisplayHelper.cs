@@ -10,7 +10,7 @@ namespace PixelBoard
     {
         internal sbyte height = 20;
         internal sbyte width = 10;
-        internal sbyte framerate = 25;
+        internal sbyte framerate = 60;
         private volatile bool boardDirty = false;
         internal static System.Timers.Timer displayRefreshTimer;
         private readonly object boardLock = new object();

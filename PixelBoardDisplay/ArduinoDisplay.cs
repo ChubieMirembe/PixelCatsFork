@@ -147,6 +147,15 @@ namespace PixelBoard
 
             // Send LCD packet to Arduino
             SendLcdTextToArduino(this.dh.currentLCDNumber);
+
+            // Also set the LCD/7-seg color based on score so the displayed number is colored on hardware.
+            try
+            {
+                var col = ScoreColorFromScoreByThousands(value);
+                // reuse the existing 7-seg packet to set digit colors (same color for all three digits)
+                Display7SegHud(0, 0, 0, (col.r, col.g, col.b), (col.r, col.g, col.b), (col.r, col.g, col.b), value);
+            }
+            catch { }
         }
 
         public void DisplayInt(int value, bool? leftAligned)
@@ -156,6 +165,14 @@ namespace PixelBoard
 
             // Send LCD packet to Arduino
             SendLcdTextToArduino(this.dh.currentLCDNumber);
+
+            // Also set the LCD/7-seg color based on score so the displayed number is colored on hardware.
+            try
+            {
+                var col = ScoreColorFromScoreByThousands(value);
+                Display7SegHud(0, 0, 0, (col.r, col.g, col.b), (col.r, col.g, col.b), (col.r, col.g, col.b), value);
+            }
+            catch { }
         }
 
         public void DisplayInts(int leftValue, int rightValue)
@@ -180,6 +197,56 @@ namespace PixelBoard
             // Send LCD packet to Arduino
             SendLcdTextToArduino(this.dh.currentLCDNumber);
         }
+        // Compute an RGB color for the score that matches the Arduino smoothing by thousands.
+        // Returns (r,g,b) as bytes 0..255.
+        private (byte r, byte g, byte b) ScoreColorFromScoreByThousands(int score)
+        {
+            const int HUE_CYCLE_K = 6; // rainbow every 6000 points (tune)
+            int k = score / 1000; // which 1000-block we're in
+            uint frac = (uint)(((ulong)(score % 1000) * 65535UL) / 1000UL); // 0..65535
+
+            ushort hue0 = (ushort)(((ulong)k * 65535UL) / (ulong)HUE_CYCLE_K);
+            ushort hue1 = (ushort)(((ulong)(k + 1) * 65535UL) / (ulong)HUE_CYCLE_K);
+
+            int dh = (short)(hue1 - hue0); // signed 16-bit delta
+            // choose shortest path around the circle
+            if (dh > 32767) dh -= 65536;
+            if (dh < -32768) dh += 65536;
+
+            ushort hue = (ushort)(hue0 + ((dh * (int)frac) >> 16));
+
+            // Use an Adafruit-like ColorHSV implementation (hue 0..65535, sat 0..255, val 0..255)
+            byte sat = 255;
+            byte val = 200; // visibility like Arduino example
+            return ColorHSVToRgb(hue, sat, val);
+        }
+
+        // Adafruit-like ColorHSV -> RGB conversion. hue: 0..65535, sat,val: 0..255
+        private (byte r, byte g, byte b) ColorHSVToRgb(ushort hue, byte sat, byte val)
+        {
+            // Based on Adafruit_NeoPixel ColorHSV implementation (integer math approximation)
+            const int regionSize = 65536 / 6; // 10922
+            int region = hue / regionSize; // 0..5
+            int remainder = (hue - (ushort)(region * regionSize)) * 6; // scaled across region
+
+            int p = (val * (255 - sat)) / 255;
+            int q = (val * (255 - ((sat * remainder) / 65535))) / 255;
+            int t = (val * (255 - ((sat * (65535 - remainder)) / 65535))) / 255;
+
+            int r = 0, g = 0, b = 0;
+            switch (region)
+            {
+                case 0: r = val; g = t; b = p; break;
+                case 1: r = q; g = val; b = p; break;
+                case 2: r = p; g = val; b = t; break;
+                case 3: r = p; g = q; b = val; break;
+                case 4: r = t; g = p; b = val; break;
+                default: r = val; g = p; b = q; break; // case 5
+            }
+
+            return ((byte)r, (byte)g, (byte)b);
+        }
+
         private void SendLcdTextToArduino(string text)
         {
             if (string.IsNullOrEmpty(text)) text = "";
