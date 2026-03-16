@@ -1,59 +1,119 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿#nullable enable
+
+using Microsoft.Extensions.Configuration;
 using PixelBoard;
 using System;
 using System.Collections.Generic;
-using System.Drawing;
-using System.IO;
 using System.Threading;
+using System.IO;
+using System.Text.Json;
+using ConsoleTest.Games;
+using System.Threading.Tasks;
 
 namespace SnakeGame
 {
-    class Program
+    internal class Program
     {
-        public enum State { Title, Playing, GameOver };
-        public static State state = State.Playing;
-        public enum GameChoiceState { Snake, Tetris, Education};
+        public enum State { Title, Playing, GameOver }
+        public static State state = State.Title;
 
+        public enum GameChoiceState { Snake, Tetris, Education }
         public static GameChoiceState game = GameChoiceState.Snake;
 
-        public static IConfiguration _config = null;
-        public static IPixel[,] title = null;
-        public static IPixel[,] board = new IPixel[20, 10];
-        public static IPixel[,] background = new IPixel[20, 10];
-        //public static bool isInitialised = false;
-        private static float rainbowShift = 0f;
+        // Fix CS8625: don't assign null to non-nullable
+        public static IConfiguration? _config;
 
-        static void Main(string[] args)
+        private static readonly IPixel[,] pixels = new IPixel[20, 10];
+
+        // Fix CS8618: these are initialized in Main, so make them nullable (or initialize here)
+        private static Dictionary<GameChoiceState, IGame>? games;
+        private static IGame? currentGame;
+
+        private static async Task Main(string[] args)
         {
-            // Load configuration
+            // Fix filename typo: "appsettings. json" -> "appsettings.json"
             _config = new ConfigurationBuilder()
                 .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
+                .AddEnvironmentVariables()
                 .Build();
-            var useEmulator = bool.Parse(_config.GetValue(Type.GetType("System.String"), "UseEmulator").ToString());
 
-            //ReadBMP("hello.txt", ref title);
+            bool useEmulator = true;
+            var useEmulatorValue = _config["UseEmulator"];
+            if (!string.IsNullOrEmpty(useEmulatorValue))
+            {
+                _ = bool.TryParse(useEmulatorValue, out useEmulator);
+            }
+            var baseUrl = _config["Leaderboard:BaseUrl"] ?? "http://127.0.0.1:3000";
+
+            string GetSecretForGame(GameChoiceState g) => g switch
+            {
+                GameChoiceState.Snake => _config["LEADERBOARD_HMAC_SNAKE"] ?? "",
+                GameChoiceState.Tetris => _config["LEADERBOARD_HMAC_TETRIS"] ?? "",
+                GameChoiceState.Education => _config["LEADERBOARD_HMAC_EDU"] ?? "",
+                _ => ""
+            };
 
             IDisplay emulatorDisplay = new ConsoleDisplay();
-            IDisplay hardwareDisplay = new ArduinoDisplay();
+             IDisplay hardwareDisplay = new ArduinoDisplay(); // Uncomment when hardware display is available
 
-            // Then when drawing:
+            // Initialize games
+            games = new Dictionary<GameChoiceState, IGame>
+            {
+                { GameChoiceState.Snake, new Snake() },
+                { GameChoiceState.Tetris, new Tetris() },
+                { GameChoiceState.Education, new Education() }
+            };
 
+            currentGame = games[game];
 
-            IPixel[,] pixels = new IPixel[20, 10];
+            // Score export setup
+            int lastExportedScore = int.MinValue;
+            string sharedDir;
+            try
+            {
+                sharedDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "shared"));
+                Directory.CreateDirectory(sharedDir);
+            }
+            catch
+            {
+                sharedDir = Path.Combine(AppContext.BaseDirectory, "shared");
+                Directory.CreateDirectory(sharedDir);
+            }
 
-            Queue<(int x, int y)> snake = new Queue<(int x, int y)>();
-            int snakeLength = 5;
-            int headX = 10;
-            int headY = 5;
-            int directionX = 1;
-            int directionY = 0;
-            Random rand = new Random();
-            (int x, int y) food = (rand.Next(20), rand.Next(10));
-            int score = 0;
+            string scoreFilePath = Path.Combine(sharedDir, "latest_score.json");
+            Console.WriteLine($"[ConsoleTest] Score file: {scoreFilePath}");
 
+            // Ensure the file exists at startup with the current game's score (safe fallback to 0)
+            try
+            {
+                // Fix CS8604: currentGame is nullable, so guard it once and keep a non-null local
+                var gameLocal = currentGame ?? throw new InvalidOperationException("Current game was not initialized.");
+
+                int initialScore;
+                try { initialScore = gameLocal.GetScore(); } catch { initialScore = 0; }
+
+                // Write initial file (no code - server will generate and store it)
+                WriteScoreFileAtomic(scoreFilePath, initialScore, gameLocal, state: "Startup");
+
+                lastExportedScore = initialScore;
+                Console.WriteLine($"[ConsoleTest] Initialized score file '{scoreFilePath}' with score {initialScore}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ConsoleTest] Failed to initialize score file '{scoreFilePath}': {ex.GetType().Name}: {ex.Message}");
+            }
+
+            State previousState = state;
             state = State.Title;
+
+            // Fix CS8600: declare as nullable
+            string? lastGameOverCode = null;
+
             while (true)
             {
+                // Fix CS8600/CS8602 patterns by working with non-null locals inside the loop
+                var gameLocal = currentGame ?? throw new InvalidOperationException("Current game was not initialized.");
+
                 if (state == State.Title)
                 {
                     if (Console.KeyAvailable)
@@ -64,249 +124,183 @@ namespace SnakeGame
                         {
                             case ConsoleKey.S:
                                 state = State.Playing;
+                                gameLocal.Initialize(pixels);
+                                lastGameOverCode = null;
+                                gameLocal.SetGameOverCode(null);
                                 break;
+
                             case ConsoleKey.A:
                                 game = (GameChoiceState)(((int)game + 2) % 3);
+                                currentGame = games![game];
                                 break;
+
                             case ConsoleKey.D:
                                 game = (GameChoiceState)(((int)game + 1) % 3);
+                                currentGame = games![game];
                                 break;
                         }
                     }
-                    if (game == GameChoiceState.Snake)
-                    {
 
-                        rainbowShift += 0.0001f; // frameCount should increment every frame
-                        for (sbyte i = 0; i < 20; i++)
-                        {
-                            for (sbyte j = 0; j < 10; j++)
-                            {
-                                float hue = (rainbowShift + (i + j) * 0.05f) % 1f;
-                                Color color = ColorFromHSV(hue * 360, 1f, 1f);
-                                pixels[i, j] = new Pixel(color.R, color.G, color.B);
-                            }
-                        }
-
-
-                        int[,] sShape = new int[,]
-                        {
-                            {1, 1, 1, 0, 1},
-                            {1, 0, 1, 0, 1},
-                            {1, 0, 1, 0, 1},
-                            {1, 0, 1, 0, 1},
-                            {1, 0, 1, 1, 1}
-                        };
-                        int shapeWidth = sShape.GetLength(1);
-                        int shapeHeight = sShape.GetLength(0);
-                        int offsetX = (20 - shapeWidth) / 2;
-                        int offsetY = (10 - shapeHeight) / 2;
-
-                        for (int y = 0; y < shapeHeight; y++)
-                        {
-                            for (int x = 0; x < shapeWidth; x++)
-                            {
-                                if (sShape[y, x] == 1)
-                                {
-                                    pixels[offsetX + x, offsetY + y] = new Pixel(0, 0, 0); 
-                                }
-                            }
-                        }
-
-                    }
-                    else if (game == GameChoiceState.Tetris)
-                    {
-                        for (sbyte i = 0; i < 20; i++)
-                        {
-                            for (sbyte j = 0; j < 10; j++)
-                            {
-                                pixels[i, j] = new Pixel(100, 75, 200);
-                            }
-                        }
-                        int[,] sShape = new int[,]
-                        {
-                            {1, 0, 0, 0, 0},
-                            {1, 0, 0, 0, 0},
-                            {1, 1, 1, 1, 1},
-                            {1, 0, 0, 0, 0},
-                            {1, 0, 0, 0, 0}
-                        };
-                        int shapeWidth = sShape.GetLength(1);
-                        int shapeHeight = sShape.GetLength(0);
-                        int offsetX = (20 - shapeWidth) / 2;
-                        int offsetY = (10 - shapeHeight) / 2;
-
-                        for (int y = 0; y < shapeHeight; y++)
-                        {
-                            for (int x = 0; x < shapeWidth; x++)
-                            {
-                                if (sShape[y, x] == 1)
-                                {
-                                    pixels[offsetX + x, offsetY + y] = new Pixel(0, 0, 0); // Black pixel
-                                }
-                            }
-                        }
-                    }
-                    else if (game == GameChoiceState.Education)
-                    {
-                        for (sbyte i = 0; i < 20; i++)
-                        {
-                            for (sbyte j = 0; j < 10; j++)
-                            {
-                                pixels[i, j] = new Pixel(200, 50, 150);
-                            }
-                        }
-                        int[,] sShape = new int[,]
-                       {
-                            {1, 1, 1, 1, 1},
-                            {1, 0, 1, 0, 1},
-                            {1, 0, 1, 0, 1},
-                            {1, 0, 1, 0, 1},
-                            {1, 0, 1, 0, 1}
-                       };
-                        int shapeWidth = sShape.GetLength(1);
-                        int shapeHeight = sShape.GetLength(0);
-                        int offsetX = (20 - shapeWidth) / 2;
-                        int offsetY = (10 - shapeHeight) / 2;
-
-                        for (int y = 0; y < shapeHeight; y++)
-                        {
-                            for (int x = 0; x < shapeWidth; x++)
-                            {
-                                if (sShape[y, x] == 1)
-                                {
-                                    pixels[offsetX + x, offsetY + y] = new Pixel(0, 0, 0); // Black pixel
-                                }
-                            }
-                        }
-                    }
+                    gameLocal.DrawTitle(pixels);
                 }
 
-                
                 if (state == State.Playing)
                 {
                     Thread.Sleep(100);
 
-                    if (game == GameChoiceState.Tetris)
+                    if (Console.KeyAvailable)
                     {
-                        Color[] rainbowColors = new Color[]
+                        var key = Console.ReadKey(true).Key;
+                        bool stateChanged = false;
+                        gameLocal.HandleInput(key, ref stateChanged);
+
+                        if (stateChanged)
                         {
-                            Color.Red,
-                            Color.Orange,
-                            Color.Yellow,
-                            Color.Green,
-                            Color.Blue,
-                            Color.Indigo,
-                            Color.Violet
-                        };
-
-                        int frameOffset = Environment.TickCount / 100;
-
-                        for (int row = 0; row < board.GetLength(0); row++)
-                        {
-                            for (int col = 0; col < board.GetLength(1); col++)
-                            {
-                                int colorIndex = (row + col + frameOffset) % rainbowColors.Length;
-                                Color color = rainbowColors[colorIndex];
-
-                                board[row, col] = new Pixel(color.R, color.G, color.B); // Assuming Pixel implements IPixel
-                            }
+                            state = State.Title;
                         }
                     }
-                    // Snake setup
-                    if (game == GameChoiceState.Snake) 
+
+                    gameLocal.Update(pixels);
+
+                    if (gameLocal.IsGameOver())
                     {
-                        emulatorDisplay.DisplayInt(score);
-                        hardwareDisplay.DisplayInt(score);
-                        // Check if snake eats food
-                        if (headX == food.x && headY == food.y)
-                        {
-                            score++;
-                            snakeLength++;
-                            food = (rand.Next(20), rand.Next(10));
-                        }
-
-                        // Check for input
-                        if (Console.KeyAvailable)
-                        {
-                            var key = Console.ReadKey(true).Key;
-
-                            switch (key)
-                            {
-                                case ConsoleKey.W:
-                                    directionX = -1; directionY = 0;
-                                    break;
-                                case ConsoleKey.S:
-                                    directionX = 1; directionY = 0;
-                                    break;
-                                case ConsoleKey.A:
-                                    directionX = 0; directionY = -1;
-                                    break;
-                                case ConsoleKey.D:
-                                    directionX = 0; directionY = 1;
-                                    break;
-                            }
-                        }
-
-                        // Clear background
-                        for (sbyte i = 0; i < 20; i++)
-                        {
-                            for (sbyte j = 0; j < 10; j++)
-                            {
-                                pixels[i, j] = new Pixel(255, 30, 255);
-                            }
-                        }
-
-                        // Move snake
-                        headX += directionX;
-                        headY += directionY;
-
-                        if (headX >= 20) headX = 0;
-                        if (headX < 0) headX = 19;
-                        if (headY >= 10) headY = 0;
-                        if (headY < 0) headY = 9;
-
-                        snake.Enqueue((headX, headY));
-                        if (snake.Count > snakeLength)
-                            snake.Dequeue();
-
-                        foreach (var (x, y) in snake)
-                        {
-                            pixels[x, y] = new Pixel(0, 255, 0); // Green snake
-                        }
-                        // Draw food
-                        pixels[food.x, food.y] = new Pixel(255, 0, 0); // Red food
+                        state = State.GameOver;
                     }
-
-                   
-
                 }
+
+                if (state == State.GameOver)
+                {
+                    // keep updating/drawing while in GameOver visual state
+                    gameLocal.Update(pixels);
+
+                    // Write final score first to avoid race with server-side generation.
+                    int finalScore = gameLocal.GetScore();
+                    try
+                    {
+                        string gameCode = gameLocal.GameId;
+
+                        string secret = GetSecretForGame(game);
+                        if (string.IsNullOrWhiteSpace(secret))
+                            throw new Exception($"Missing env var for {game}. Set LEADERBOARD_HMAC_{game.ToString().ToUpperInvariant()}");
+
+                        var leaderboard = new ConsoleTest.LeaderboardClient(baseUrl, secret);
+                        string claimCode = await leaderboard.MintClaimCodeAsync(gameCode, finalScore);
+
+                        lastGameOverCode = claimCode;
+                        gameLocal.SetGameOverCode(claimCode);
+
+                        WriteScoreFileAtomic(scoreFilePath, finalScore, gameLocal, state: "GameOver", code: claimCode);
+                        Console.WriteLine($"[ConsoleTest] Final score: {finalScore}, server code: {claimCode}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[ConsoleTest] Failed to mint claim code: {ex.Message}");
+                    }
+
+                    Thread.Sleep(1000);
+
+                    Console.WriteLine($"[ConsoleTest] Returning to title screen with code {lastGameOverCode}");
+                    state = State.Title;
+                }
+
+                if (previousState != state)
+                {
+                    Console.WriteLine($"[ConsoleTest] State changed {previousState} -> {state}");
+                    previousState = state;
+                }
+
+                if (!string.IsNullOrEmpty(lastGameOverCode) && state == State.Title)
+                {
+                    if (int.TryParse(lastGameOverCode, out int codeInt))
+                    {
+                        emulatorDisplay.DisplayInt(codeInt);
+                        hardwareDisplay.DisplayInt(codeInt);
+                    }
+                }
+                else
+                {
+                    if (gameLocal is ConsoleTest.Games.Tetris tetris && state == State.Playing)
+                    {
+                        // Emulator 
+                        emulatorDisplay.DisplayText(tetris.GetHudText());
+
+                        // Hardware
+                        if (hardwareDisplay is PixelBoard.ArduinoDisplay arduino)
+                        {
+                            byte dividerMask = 1 << (7 - 1);
+
+                            byte holdMask = tetris.GetHoldMaskForHud();
+                            byte nextMask = tetris.GetNextMaskForHud();
+
+                            var holdCol = tetris.GetHoldColorForHud();
+                            var divCol = ((byte)60, (byte)60, (byte)60);
+                            var nextCol = tetris.GetNextColorForHud();
+
+                            arduino.Display7SegHud(
+                                holdMask,
+                                dividerMask,
+                                nextMask,
+                                holdCol,
+                                divCol,
+                                nextCol,
+                                tetris.GetScore()
+                            );
+                        }
+                        else
+                        {
+                            // fallback if not arduino
+                            hardwareDisplay.DisplayInt(tetris.GetScore());
+                        }
+                    }
+                    else
+                    {
+                        emulatorDisplay.DisplayInt(gameLocal.GetScore());
+                        hardwareDisplay.DisplayInt(gameLocal.GetScore());
+                    }
+                }
+
                 emulatorDisplay.Draw(pixels);
-                hardwareDisplay.Draw(pixels);
+                 hardwareDisplay.Draw(pixels);
             }
-            
         }
-        public static Color ColorFromHSV(double hue, double saturation, double value)
+
+        // Write score file WITHOUT the code — server stores the code when it receives the score.
+        // If 'code' is provided, include it in the JSON (written atomically).
+        private static void WriteScoreFileAtomic(string path, int score, IGame? game, string? state = null, string? code = null)
         {
-            int hi = Convert.ToInt32(Math.Floor(hue / 60)) % 6;
-            double f = hue / 60 - Math.Floor(hue / 60);
-
-            value = value * 255;
-            int v = Convert.ToInt32(value);
-            int p = Convert.ToInt32(value * (1 - saturation));
-            int q = Convert.ToInt32(value * (1 - f * saturation));
-            int t = Convert.ToInt32(value * (1 - (1 - f) * saturation));
-
-            return hi switch
+            // Use a dictionary so we only include the 'code' property when it is non-null.
+            var payload = new Dictionary<string, object?>
             {
-                0 => Color.FromArgb(255, v, t, p),
-                1 => Color.FromArgb(255, q, v, p),
-                2 => Color.FromArgb(255, p, v, t),
-                3 => Color.FromArgb(255, p, q, v),
-                4 => Color.FromArgb(255, t, p, v),
-                _ => Color.FromArgb(255, v, p, q),
+                ["score"] = score,
+                ["state"] = state,
+                ["gameName"] = game?.ToString() ?? string.Empty,
+                ["timestamp"] = DateTimeOffset.UtcNow.ToString("O")
             };
-        }
 
+            if (!string.IsNullOrEmpty(code))
+            {
+                payload["code"] = code;
+            }
+
+            var json = JsonSerializer.Serialize(payload);
+
+            var dir = Path.GetDirectoryName(path);
+            if (string.IsNullOrEmpty(dir))
+                dir = AppContext.BaseDirectory;
+
+            Directory.CreateDirectory(dir);
+
+            var tmp = Path.Combine(dir, $"{Guid.NewGuid():N}.tmp");
+            File.WriteAllText(tmp, json);
+
+            try
+            {
+                File.Copy(tmp, path, overwrite: true);
+            }
+            finally
+            {
+                try { File.Delete(tmp); } catch { }
+            }
+        }
     }
 }
-    
