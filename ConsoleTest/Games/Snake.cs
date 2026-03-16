@@ -3,11 +3,15 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace ConsoleTest.Games
 {
     public class Snake : IGame
     {
+        // Unique identifier for this game. Replace with the real ID provided by the site.
+        public string GameId { get; } = "VTwLvlyoHGw";
+
         // Game variables
         private Queue<(int x, int y)> snake = new Queue<(int x, int y)>();
         private int snakeLength = 5;
@@ -26,6 +30,8 @@ namespace ConsoleTest.Games
         private int moveCounter = 0;
         private string gameOverCode = null;
 
+        private TaskCompletionSource<string?>? codeTcs;
+
         public void Initialize(IPixel[,] pixels)
         {
             // Reset to original values
@@ -42,6 +48,7 @@ namespace ConsoleTest.Games
             gameOver = false;
             moveCounter = 0;
             gameOverCode = null;  // Reset code
+            codeTcs = null;
 
             // Initialize snake body
             for (int i = 0; i < snakeLength; i++)
@@ -120,7 +127,6 @@ namespace ConsoleTest.Games
                 if (headX < 0 || headX >= 20 || headY < 0 || headY >= 10)
                 {
                     gameOver = true;
-                    gameOverCode = CodeGenerator.GenerateSixDigitCode();  // Generate code
                     DrawGameOver(pixels);
                     return;
                 }
@@ -138,7 +144,6 @@ namespace ConsoleTest.Games
             if (snake.Contains((headX, headY)))
             {
                 gameOver = true;
-                gameOverCode = CodeGenerator.GenerateSixDigitCode();  // Generate code
                 DrawGameOver(pixels);
                 return;
             }
@@ -224,9 +229,33 @@ namespace ConsoleTest.Games
         // Expose game-over status so Program can reliably transition to GameOver and export final score. 
         public bool IsGameOver() => gameOver;
 
-        public string GetGameOverCode() => gameOverCode;  // Return the generated code
+        public string GetGameOverCode() => gameOverCode;  // Return the generated code (may be null)
 
         public int GetScore() => score;
+
+        public void SetGameOverCode(string? code)
+        {
+            gameOverCode = code;
+            codeTcs?.TrySetResult(code);
+        }
+
+        /// <summary>
+        /// Awaitable helper that waits up to <paramref name="timeoutMs"/> for the server-provided code.
+        /// Returns the code if available, otherwise returns whatever value is currently in <see cref="gameOverCode"/> (may be null).
+        /// Callers may block on the returned Task if they can't be async.
+        /// </summary>
+        public async Task<string?> WaitForGameOverCodeAsync(int timeoutMs = 3000)
+        {
+            if (!string.IsNullOrEmpty(gameOverCode)) return gameOverCode;
+            codeTcs ??= new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var completed = await Task.WhenAny(codeTcs.Task, Task.Delay(timeoutMs)).ConfigureAwait(false);
+            if (completed == codeTcs.Task)
+                return await codeTcs.Task.ConfigureAwait(false);
+
+            // timeout -> return current value (may be null or fallback code)
+            return gameOverCode;
+        }
 
         private int GetMoveSpeed()
         {

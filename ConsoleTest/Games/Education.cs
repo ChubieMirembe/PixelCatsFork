@@ -1,10 +1,14 @@
 using PixelBoard;
 using System;
+using System.Threading.Tasks;
 
 namespace ConsoleTest.Games
 {
     public class Education : IGame
     {
+        // Unique identifier for this game. Replace with the real ID provided by the site.
+        public string GameId { get; } = "VJhH-GChBH8";
+
         private int score = 0;
         private int lives = 3;
         private int rows = 20;
@@ -24,6 +28,8 @@ namespace ConsoleTest.Games
         private bool gameOver = false;
         private string gameOverCode = null;
 
+        private TaskCompletionSource<string?>? codeTcs;
+
         public void Initialize(IPixel[,] pixels)
         {
             score = 0;
@@ -34,6 +40,7 @@ namespace ConsoleTest.Games
             spawnCounter = 0;
             gameOver = false;
             gameOverCode = null;
+            codeTcs = null;
         }
 
         public void DrawTitle(IPixel[,] pixels)
@@ -122,14 +129,6 @@ namespace ConsoleTest.Games
                                     if (lives <= 0)
                                     {
                                         gameOver = true;
-                                        try
-                                        {
-                                            gameOverCode = CodeGenerator.GenerateSixDigitCode();
-                                        }
-                                        catch
-                                        {
-                                            gameOverCode = null;
-                                        }
                                     }
                                 }
                                 board[r, c] = 0; // remove source cell (block consumed / removed)
@@ -171,14 +170,6 @@ namespace ConsoleTest.Games
                                 if (lives <= 0)
                                 {
                                     gameOver = true;
-                                    try
-                                    {
-                                        gameOverCode = CodeGenerator.GenerateSixDigitCode();
-                                    }
-                                    catch
-                                    {
-                                        gameOverCode = null;
-                                    }
                                 }
                             }
                             board[rows - 1, c] = 0;
@@ -230,6 +221,12 @@ namespace ConsoleTest.Games
         public string GetGameOverCode() => gameOverCode;
 
         public int GetScore() => score;
+
+        public void SetGameOverCode(string? code)
+        {
+            gameOverCode = code;
+            codeTcs?.TrySetResult(code);
+        }
 
         private bool IsBucketCoveringColumn(int col)
         {
@@ -309,7 +306,6 @@ namespace ConsoleTest.Games
             }
         }
 
-        // Compute current drop interval based on score so the game gradually speeds up
         private int GetCurrentDropInterval()
         {
             // Reduce interval by 1 for each `speedupScoreStep` points, down to `minDropInterval`.

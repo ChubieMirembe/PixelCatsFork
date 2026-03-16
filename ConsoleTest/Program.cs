@@ -8,6 +8,7 @@ using System.Threading;
 using System.IO;
 using System.Text.Json;
 using ConsoleTest.Games;
+using System.Threading.Tasks;
 
 namespace SnakeGame
 {
@@ -28,11 +29,12 @@ namespace SnakeGame
         private static Dictionary<GameChoiceState, IGame>? games;
         private static IGame? currentGame;
 
-        private static void Main(string[] args)
+        private static async Task Main(string[] args)
         {
             // Fix filename typo: "appsettings. json" -> "appsettings.json"
             _config = new ConfigurationBuilder()
                 .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
+                .AddEnvironmentVariables()
                 .Build();
 
             bool useEmulator = true;
@@ -41,9 +43,18 @@ namespace SnakeGame
             {
                 _ = bool.TryParse(useEmulatorValue, out useEmulator);
             }
+            var baseUrl = _config["Leaderboard:BaseUrl"] ?? "http://127.0.0.1:3000";
+
+            string GetSecretForGame(GameChoiceState g) => g switch
+            {
+                GameChoiceState.Snake => _config["LEADERBOARD_HMAC_SNAKE"] ?? "",
+                GameChoiceState.Tetris => _config["LEADERBOARD_HMAC_TETRIS"] ?? "",
+                GameChoiceState.Education => _config["LEADERBOARD_HMAC_EDU"] ?? "",
+                _ => ""
+            };
 
             IDisplay emulatorDisplay = new ConsoleDisplay();
-            // IDisplay hardwareDisplay = new ArduinoDisplay(); // Uncomment when hardware display is available
+             IDisplay hardwareDisplay = new ArduinoDisplay(); // Uncomment when hardware display is available
 
             // Initialize games
             games = new Dictionary<GameChoiceState, IGame>
@@ -81,8 +92,8 @@ namespace SnakeGame
                 int initialScore;
                 try { initialScore = gameLocal.GetScore(); } catch { initialScore = 0; }
 
-                // Fix CS8625 at call-site by using nullable parameters in signature (see method below)
-                WriteScoreFileAtomic(scoreFilePath, initialScore, gameLocal, state: "Startup", code: null);
+                // Write initial file (no code - server will generate and store it)
+                WriteScoreFileAtomic(scoreFilePath, initialScore, gameLocal, state: "Startup");
 
                 lastExportedScore = initialScore;
                 Console.WriteLine($"[ConsoleTest] Initialized score file '{scoreFilePath}' with score {initialScore}");
@@ -115,6 +126,7 @@ namespace SnakeGame
                                 state = State.Playing;
                                 gameLocal.Initialize(pixels);
                                 lastGameOverCode = null;
+                                gameLocal.SetGameOverCode(null);
                                 break;
 
                             case ConsoleKey.A:
@@ -158,20 +170,31 @@ namespace SnakeGame
 
                 if (state == State.GameOver)
                 {
+                    // keep updating/drawing while in GameOver visual state
                     gameLocal.Update(pixels);
 
-                    lastGameOverCode = gameLocal.GetGameOverCode();
-
+                    // Write final score first to avoid race with server-side generation.
+                    int finalScore = gameLocal.GetScore();
                     try
                     {
-                        int finalScore = gameLocal.GetScore();
-                        WriteScoreFileAtomic(scoreFilePath, finalScore, gameLocal, state: "GameOver", code: lastGameOverCode);
-                        lastExportedScore = finalScore;
-                        Console.WriteLine($"[ConsoleTest] Final score exported: {finalScore}, Code: {lastGameOverCode} -> {scoreFilePath}");
+                        string gameCode = gameLocal.GameId;
+
+                        string secret = GetSecretForGame(game);
+                        if (string.IsNullOrWhiteSpace(secret))
+                            throw new Exception($"Missing env var for {game}. Set LEADERBOARD_HMAC_{game.ToString().ToUpperInvariant()}");
+
+                        var leaderboard = new ConsoleTest.LeaderboardClient(baseUrl, secret);
+                        string claimCode = await leaderboard.MintClaimCodeAsync(gameCode, finalScore);
+
+                        lastGameOverCode = claimCode;
+                        gameLocal.SetGameOverCode(claimCode);
+
+                        WriteScoreFileAtomic(scoreFilePath, finalScore, gameLocal, state: "GameOver", code: claimCode);
+                        Console.WriteLine($"[ConsoleTest] Final score: {finalScore}, server code: {claimCode}");
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[ConsoleTest] Failed to write final score to '{scoreFilePath}': {ex.GetType().Name}: {ex.Message}");
+                        Console.WriteLine($"[ConsoleTest] Failed to mint claim code: {ex.Message}");
                     }
 
                     Thread.Sleep(1000);
@@ -191,32 +214,73 @@ namespace SnakeGame
                     if (int.TryParse(lastGameOverCode, out int codeInt))
                     {
                         emulatorDisplay.DisplayInt(codeInt);
-                        // hardwareDisplay.DisplayInt(codeInt);
+                        hardwareDisplay.DisplayInt(codeInt);
                     }
                 }
                 else
                 {
-                    emulatorDisplay.DisplayInt(gameLocal.GetScore());
-                    // hardwareDisplay.DisplayInt(gameLocal.GetScore());
+                    if (gameLocal is ConsoleTest.Games.Tetris tetris && state == State.Playing)
+                    {
+                        // Emulator 
+                        emulatorDisplay.DisplayText(tetris.GetHudText());
+
+                        // Hardware
+                        if (hardwareDisplay is PixelBoard.ArduinoDisplay arduino)
+                        {
+                            byte dividerMask = 1 << (7 - 1);
+
+                            byte holdMask = tetris.GetHoldMaskForHud();
+                            byte nextMask = tetris.GetNextMaskForHud();
+
+                            var holdCol = tetris.GetHoldColorForHud();
+                            var divCol = ((byte)60, (byte)60, (byte)60);
+                            var nextCol = tetris.GetNextColorForHud();
+
+                            arduino.Display7SegHud(
+                                holdMask,
+                                dividerMask,
+                                nextMask,
+                                holdCol,
+                                divCol,
+                                nextCol,
+                                tetris.GetScore()
+                            );
+                        }
+                        else
+                        {
+                            // fallback if not arduino
+                            hardwareDisplay.DisplayInt(tetris.GetScore());
+                        }
+                    }
+                    else
+                    {
+                        emulatorDisplay.DisplayInt(gameLocal.GetScore());
+                        hardwareDisplay.DisplayInt(gameLocal.GetScore());
+                    }
                 }
 
                 emulatorDisplay.Draw(pixels);
-                // hardwareDisplay.Draw(pixels);
+                 hardwareDisplay.Draw(pixels);
             }
         }
 
-        // Fix CS8625: allow null for optional params by making them nullable.
-        // Also avoids CS8604 by accepting IGame? and coalescing safely.
+        // Write score file WITHOUT the code — server stores the code when it receives the score.
+        // If 'code' is provided, include it in the JSON (written atomically).
         private static void WriteScoreFileAtomic(string path, int score, IGame? game, string? state = null, string? code = null)
         {
-            var payload = new
+            // Use a dictionary so we only include the 'code' property when it is non-null.
+            var payload = new Dictionary<string, object?>
             {
-                score,
-                state,
-                code,
-                gameName = game?.ToString() ?? string.Empty,
-                timestamp = DateTimeOffset.UtcNow.ToString("O")
+                ["score"] = score,
+                ["state"] = state,
+                ["gameName"] = game?.ToString() ?? string.Empty,
+                ["timestamp"] = DateTimeOffset.UtcNow.ToString("O")
             };
+
+            if (!string.IsNullOrEmpty(code))
+            {
+                payload["code"] = code;
+            }
 
             var json = JsonSerializer.Serialize(payload);
 
